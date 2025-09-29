@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QProgressBar,
+    QPushButton,
 )
 from .settings_dialog import SettingsDialog
 from .search_panel import SearchPanel
@@ -195,7 +196,13 @@ class MainWindow(QMainWindow):
 
         # Help Menu
         help_menu = menu_bar.addMenu("Help")
-        help_menu.addAction("About")
+        about_action = help_menu.addAction("About")
+        about_action.triggered.connect(self.open_about_dialog)
+
+    def open_about_dialog(self):
+        from .about_dialog import AboutDialog
+        dialog = AboutDialog(self)
+        dialog.exec()
 
     def open_settings_dialog(self):
         dialog = SettingsDialog(self)
