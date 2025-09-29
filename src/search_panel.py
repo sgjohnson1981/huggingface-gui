@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QTimer
 
 
 class SearchPanel(QWidget):
@@ -34,19 +34,39 @@ class SearchPanel(QWidget):
 
         # Filters
         self.filters_group = QGroupBox("Filters")
-        self.filters_layout = QVBoxLayout()
+        filters_group_layout = QVBoxLayout(self.filters_group)
+
+        # Filter Search Box
+        self.filter_search_input = QLineEdit()
+        self.filter_search_input.setPlaceholderText("Search filters...")
+        self.filter_search_input.textChanged.connect(self.on_filter_search_changed)
+
+        self.filter_search_timer = QTimer(self)
+        self.filter_search_timer.setSingleShot(True)
+        self.filter_search_timer.setInterval(300) # 300ms debounce delay
+        self.filter_search_timer.timeout.connect(self.perform_filter_search)
+
+        filters_group_layout.addWidget(self.filter_search_input)
+
+        # Scroll Area for checkboxes
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+
+        self.filters_widget = QWidget()
+        self.filters_layout = QVBoxLayout(self.filters_widget)
         self.task_filters = {}
 
         # Initially, show a loading message
         self.loading_label = QLabel("Loading filters...")
         self.filters_layout.addWidget(self.loading_label)
 
-        self.filters_group.setLayout(self.filters_layout)
+        # Label for "No filters found"
+        self.no_filters_found_label = QLabel("No filters found.")
+        self.no_filters_found_label.setVisible(False)
+        self.filters_layout.addWidget(self.no_filters_found_label)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.filters_group)
-
+        scroll.setWidget(self.filters_widget)
+        filters_group_layout.addWidget(scroll)
 
         # Search Button
         self.search_button = QPushButton("Search")
@@ -60,7 +80,7 @@ class SearchPanel(QWidget):
         form_layout.addRow(self.sort_combo)
 
         self.layout.addLayout(form_layout)
-        self.layout.addWidget(scroll)
+        self.layout.addWidget(self.filters_group)
         self.layout.addStretch()
         self.layout.addWidget(self.search_button)
 
@@ -89,6 +109,32 @@ class SearchPanel(QWidget):
             "filters": selected_filters,
         }
 
+    def on_filter_search_changed(self):
+        """
+        Restarts the debounce timer every time the user types in the
+        filter search box.
+        """
+        self.filter_search_timer.start()
+
+    def perform_filter_search(self):
+        """
+        Filters the list of checkboxes based on the search text.
+        This is connected to the debounce timer's timeout signal.
+        """
+        search_text = self.filter_search_input.text().lower()
+        found_match = False
+
+        for checkbox in self.task_filters.values():
+            if search_text in checkbox.text().lower():
+                checkbox.setVisible(True)
+                found_match = True
+            else:
+                checkbox.setVisible(False)
+
+        # Show/hide the "No filters found" label
+        self.no_filters_found_label.setVisible(not found_match)
+
+
     def set_enabled(self, enabled):
         """Enable or disable the search panel widgets."""
         self.search_input.setEnabled(enabled)
@@ -103,20 +149,34 @@ class SearchPanel(QWidget):
     def populate_filters(self, tags):
         """
         Populates the filter group box with checkboxes for each tag.
+        This method clears any existing filters before adding new ones.
         """
-        # Clear the "Loading..." label
+        # Reset search and hide 'not found' label
+        self.filter_search_input.clear()
+        self.no_filters_found_label.setVisible(False)
+
+        # Clear any existing widgets from the layout
+        while self.filters_layout.count():
+            item = self.filters_layout.takeAt(0)
+            widget = item.widget()
+            if widget and widget not in [self.no_filters_found_label, self.loading_label]:
+                 widget.deleteLater()
+
+        self.task_filters.clear()
+
+        # Remove loading label if it exists
         if self.loading_label:
-            self.filters_layout.removeWidget(self.loading_label)
             self.loading_label.deleteLater()
             self.loading_label = None
 
         if not tags:
-            # If no tags are returned, show an error message
+            # If no tags are returned, show an error message.
+            # This can happen on first load with no network, or if API fails.
             self.filters_layout.addWidget(QLabel("Could not load filters."))
             return
 
         # Create and add a checkbox for each tag
-        for tag in tags:
+        for tag in sorted(tags): # Sort for consistent UI
             checkbox = QCheckBox(self._format_tag_name(tag))
             self.task_filters[tag] = checkbox
             self.filters_layout.addWidget(checkbox)

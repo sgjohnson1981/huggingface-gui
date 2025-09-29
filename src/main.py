@@ -1,5 +1,5 @@
 import sys
-from PySide6.QtCore import QThreadPool
+from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -15,12 +15,14 @@ from PySide6.QtWidgets import (
 )
 from .settings_dialog import SettingsDialog
 from .search_panel import SearchPanel
-from .huggingface_service import hf_service
+from .huggingface_service import hf_service, run_download_in_process
 from .results_table import ResultsTableView, ResultsTableModel
 from .model_details_panel import ModelDetailsPanel
 from .config_manager import config_manager
+from .cache_manager import cache_manager
 from .logging_config import logger
 from .worker import Worker
+from .download_worker import DownloadWorker
 
 
 class MainWindow(QMainWindow):
@@ -31,6 +33,14 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
         self.threadpool = QThreadPool()
         logger.info(f"Multithreading with maximum {self.threadpool.maxThreadCount()} threads")
+        self.current_download_worker = None
+        self.current_download_model_id = None
+        self.cached_tags = []
+
+        # Timer to check the download queue
+        self.queue_timer = QTimer(self)
+        self.queue_timer.setInterval(100)  # Check every 100ms
+        self.queue_timer.timeout.connect(self.process_download_queue)
 
 
         # Create main layout
@@ -74,24 +84,98 @@ class MainWindow(QMainWindow):
         """
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
-        self.progress_bar = QProgressBar(self.status_bar)
+
+        self.status_bar_layout = QHBoxLayout()
+        self.status_bar_widget = QWidget()
+        self.status_bar_widget.setLayout(self.status_bar_layout)
+
+        self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.status_bar.addPermanentWidget(self.progress_bar)
+        self.progress_bar.setFixedWidth(200)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setFixedWidth(80)
+        self.cancel_button.clicked.connect(self.cancel_download)
+
+        self.status_bar_layout.addStretch()
+        self.status_bar_layout.addWidget(self.progress_bar)
+        self.status_bar_layout.addWidget(self.cancel_button)
+        self.status_bar_layout.setContentsMargins(0,0,0,0)
+
+        self.status_bar.addPermanentWidget(self.status_bar_widget)
+
+    def process_download_queue(self):
+        """
+        Processes messages from the download worker's queue.
+        This is called by a QTimer.
+        """
+        if not self.current_download_worker:
+            return
+
+        try:
+            # Read all available messages from the queue
+            while not self.current_download_worker.queue.empty():
+                message_type, data = self.current_download_worker.queue.get_nowait()
+
+                if message_type == 'progress':
+                    self.on_download_progress(*data)
+                elif message_type == 'result':
+                    self.on_download_finished(data)
+                    self.queue_timer.stop() # Stop polling when finished
+                elif message_type == 'error':
+                    self.on_download_error(data)
+                    self.queue_timer.stop() # Stop polling when finished
+
+        except Exception as e:
+            logger.error(f"Error processing download queue: {e}", exc_info=True)
+            self.queue_timer.stop()
+
 
     def load_initial_filters(self):
         """
-        Starts a background worker to fetch model tags and populate the search filters.
+        Loads filters from cache for a quick startup, then fetches fresh
+        filters in the background to update the cache and UI if needed.
         """
+        # 1. Load from cache and populate UI immediately
+        self.cached_tags = cache_manager.load_filters() or []
+        self.search_panel.populate_filters(self.cached_tags)
+        logger.info(f"Loaded {len(self.cached_tags)} filters from cache.")
+
+        # 2. Start background worker to fetch fresh tags
+        self.statusBar().showMessage("Checking for new filters...", 2000)
         filter_worker = Worker(hf_service.get_model_tags)
-        filter_worker.signals.result.connect(self.search_panel.populate_filters)
-        filter_worker.signals.error.connect(self.on_filter_load_error)
+        filter_worker.signals.result.connect(self.on_filter_refresh_finished)
+        filter_worker.signals.error.connect(self.on_filter_refresh_error)
         self.threadpool.start(filter_worker)
 
-    def on_filter_load_error(self, err):
+    def on_filter_refresh_finished(self, fresh_tags):
+        """
+        Handles the result of the background filter refresh. Updates the UI and
+        cache if the new tags are different from the cached ones.
+        """
+        if fresh_tags and set(fresh_tags) != set(self.cached_tags):
+            logger.info("New filters found. Updating UI and cache.")
+            self.statusBar().showMessage("Filters updated.", 5000)
+            self.search_panel.populate_filters(fresh_tags)
+            cache_manager.save_filters(fresh_tags)
+            self.cached_tags = fresh_tags
+        elif not fresh_tags and self.cached_tags:
+            logger.warning("Filter refresh returned no tags. Sticking with cached version.")
+            self.statusBar().showMessage("Failed to update filters. Using cached version.", 5000)
+        elif not fresh_tags and not self.cached_tags:
+            logger.error("Failed to fetch initial filters and no cache was available.")
+        else:
+            logger.info("Filters are up-to-date.")
+            self.statusBar().showMessage("Filters are up-to-date.", 3000)
+
+    def on_filter_refresh_error(self, err):
+        """
+        Handles errors from the background filter refresh.
+        """
         exctype, value, tb = err
-        logger.error(f"Failed to load filters: {value}", exc_info=err)
-        # The search panel will show an error message, but we can also log it.
-        self.search_panel.populate_filters([]) # Pass empty list to show error message
+        logger.error(f"Failed to refresh filters in background: {value}", exc_info=err)
+        self.statusBar().showMessage("Failed to update filters.", 5000)
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -167,6 +251,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Failed to load details.", 5000)
 
 
+    # --- Download Handling ---
+
     def on_download_clicked(self):
         model_id = self.details_panel.current_model_id
         if not model_id:
@@ -188,40 +274,59 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Starting download for {model_id}...")
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
+        self.cancel_button.setVisible(True)
         self.details_panel.download_button.setEnabled(False)
 
-        worker = Worker(hf_service.download_model, model_id, download_dir)
-        worker.signals.progress.connect(self.on_download_progress)
-        worker.signals.result.connect(self.on_download_finished)
-        worker.signals.error.connect(self.on_download_error)
-        # Re-enable the button once the worker is completely finished
-        worker.signals.finished.connect(lambda: self.details_panel.download_button.setEnabled(True))
-        self.threadpool.start(worker)
+        self.current_download_model_id = model_id
+        self.current_download_worker = DownloadWorker(
+            target=run_download_in_process,
+            args=(model_id, download_dir)
+        )
+        self.current_download_worker.start()
+        self.queue_timer.start()
 
     def on_download_progress(self, current, total):
-        """
-        Updates the download progress bar.
-        """
         if total > 0:
             self.progress_bar.setMaximum(total)
             self.progress_bar.setValue(current)
             self.status_bar.showMessage(f"Downloading file {current} of {total}...")
 
+    def cancel_download(self):
+        if self.current_download_worker and self.current_download_worker.is_running():
+            logger.info(f"Attempting to cancel download for model: {self.current_download_model_id}")
+            self.current_download_worker.stop()
+            self.queue_timer.stop()
+            hf_service.delete_model_cache(self.current_download_model_id)
+            self.status_bar.showMessage("Download cancelled.", 5000)
+            self.progress_bar.setVisible(False)
+            self.cancel_button.setVisible(False)
+            self.details_panel.download_button.setEnabled(True)
+            self.current_download_worker = None
+            self.current_download_model_id = None
+
     def on_download_finished(self, result):
         success, message = result
         self.progress_bar.setVisible(False)
+        self.cancel_button.setVisible(False)
+        self.details_panel.download_button.setEnabled(True)
+        self.current_download_worker = None
+        self.current_download_model_id = None
         self.status_bar.showMessage(message, 5000)
         if success:
-            logger.info(f"Successfully downloaded. Message: {message}")
             QMessageBox.information(self, "Download Complete", message)
         else:
-            logger.error(f"Download failed. Reason: {message}")
             QMessageBox.warning(self, "Download Failed", message)
 
     def on_download_error(self, err):
+        if self.current_download_worker is None:
+            return # Already cancelled
         exctype, value, tb = err
-        logger.critical(f"An unexpected error occurred during download: {value}", exc_info=err)
+        logger.critical(f"An unexpected error occurred during download: {value}", exc_info=(exctype, value, tb))
         self.progress_bar.setVisible(False)
+        self.cancel_button.setVisible(False)
+        self.details_panel.download_button.setEnabled(True)
+        self.current_download_worker = None
+        self.current_download_model_id = None
         QMessageBox.critical(self, "Download Error", f"An unexpected error occurred: {value}")
         self.status_bar.showMessage("Download failed.", 5000)
 

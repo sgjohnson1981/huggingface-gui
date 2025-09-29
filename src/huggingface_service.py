@@ -1,5 +1,8 @@
 import os
+import shutil
+from pathlib import Path
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 from huggingface_hub.utils import HfHubHTTPError
 from .config_manager import config_manager
 from .logging_config import logger
@@ -148,6 +151,67 @@ class HuggingFaceService:
             logger.error(f"Failed to download model {model_id}: {e}", exc_info=True)
             return False, f"Failed to download model: {e}"
 
+    def delete_model_cache(self, model_id: str):
+        """
+        Deletes the cache directory for a given model ID.
+        This is used to clean up partial downloads upon cancellation.
+        """
+        try:
+            # Construct the path to the model's cache directory
+            # e.g., "bert-base-uncased" -> "models--bert-base-uncased"
+            model_cache_dir_name = f"models--{model_id.replace('/', '--')}"
+            cache_path = Path(HUGGINGFACE_HUB_CACHE) / model_cache_dir_name
+
+            if cache_path.exists() and cache_path.is_dir():
+                logger.info(f"Deleting cache directory: {cache_path}")
+                shutil.rmtree(cache_path)
+                logger.info(f"Successfully deleted cache for model {model_id}.")
+                return True, f"Cache for {model_id} deleted."
+            else:
+                logger.warning(f"Cache directory not found for model {model_id} at {cache_path}. No action taken.")
+                return True, "Cache directory not found, no cleanup needed."
+
+        except Exception as e:
+            logger.error(f"Error deleting cache for model {model_id}: {e}", exc_info=True)
+            return False, f"Error deleting cache: {e}"
+
 
 # Global instance for easy access
 hf_service = HuggingFaceService()
+
+
+def run_download_in_process(queue, model_id, download_dir):
+    """
+    A top-level function to be run in a separate process for downloading a model.
+    It creates its own HuggingFaceService instance and communicates progress,
+    results, and errors back through a queue.
+
+    Args:
+        queue (multiprocessing.Queue): The queue to send messages back to the main thread.
+        model_id (str): The ID of the model to download.
+        download_dir (str): The directory to download the model to.
+    """
+    # This function runs in a separate process, so it needs its own imports and setup.
+    import sys
+    import traceback
+
+    try:
+        service = HuggingFaceService()
+
+        # Define a callback that puts progress updates into the queue
+        def progress_callback(current, total):
+            queue.put(('progress', (current, total)))
+
+        # Call the download method with the process-safe callback
+        success, message = service.download_model(
+            model_id,
+            download_dir,
+            progress_callback=progress_callback
+        )
+        queue.put(('result', (success, message)))
+
+    except Exception as e:
+        exctype, value = sys.exc_info()[:2]
+        tb = traceback.format_exc()
+        logger.error(f"Error in download process for {model_id}: {e}", exc_info=(exctype, value, tb))
+        queue.put(('error', (exctype, str(value), tb)))

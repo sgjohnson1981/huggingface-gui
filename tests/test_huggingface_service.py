@@ -1,7 +1,10 @@
 import unittest
+import unittest
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 from src.huggingface_service import HuggingFaceService
 from src.config_manager import ConfigManager
+from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 
 class TestHuggingFaceService(unittest.TestCase):
 
@@ -73,10 +76,40 @@ class TestHuggingFaceService(unittest.TestCase):
         mock_snapshot_download.assert_called_once_with(
             repo_id='test/model',
             local_dir='/downloads/test/model',
-            local_dir_use_symlinks=False
+            local_dir_use_symlinks=False,
+            tqdm_class=None
         )
         self.assertTrue(success)
         self.assertIn("successfully", message)
+
+    @patch('src.huggingface_service.shutil.rmtree')
+    @patch('src.huggingface_service.Path.is_dir', return_value=True)
+    @patch('src.huggingface_service.Path.exists', return_value=True)
+    def test_delete_model_cache_success(self, mock_exists, mock_is_dir, mock_rmtree):
+        """Test that delete_model_cache calls rmtree when the cache dir exists."""
+        service = HuggingFaceService()
+        model_id = 'org/model-name'
+        success, message = service.delete_model_cache(model_id)
+
+        expected_path = Path(HUGGINGFACE_HUB_CACHE) / f"models--{model_id.replace('/', '--')}"
+        mock_exists.assert_called_once()
+        mock_is_dir.assert_called_once()
+        mock_rmtree.assert_called_once_with(expected_path)
+        self.assertTrue(success)
+        self.assertIn("deleted", message)
+
+    @patch('src.huggingface_service.shutil.rmtree')
+    @patch('src.huggingface_service.Path.exists', return_value=False)
+    def test_delete_model_cache_not_found(self, mock_exists, mock_rmtree):
+        """Test that delete_model_cache does nothing if the cache dir does not exist."""
+        service = HuggingFaceService()
+        success, message = service.delete_model_cache('non-existent/model')
+
+        mock_exists.assert_called_once()
+        mock_rmtree.assert_not_called()
+        self.assertTrue(success)
+        self.assertIn("not found", message)
+
 
 if __name__ == '__main__':
     unittest.main()
