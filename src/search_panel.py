@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QFormLayout,
     QLineEdit,
     QComboBox,
@@ -26,6 +27,7 @@ class SearchPanel(QWidget):
         # Search Query
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search for models...")
+        self.search_input.textChanged.connect(self.update_clear_button_visibility)
 
         # Sorting
         self.sort_combo = QComboBox()
@@ -41,6 +43,9 @@ class SearchPanel(QWidget):
         self.filter_search_input = QLineEdit()
         self.filter_search_input.setPlaceholderText("Search filters...")
         self.filter_search_input.textChanged.connect(self.on_filter_search_changed)
+        self.filter_search_input.textChanged.connect(
+            self.update_clear_button_visibility
+        )
 
         self.filter_search_timer = QTimer(self)
         self.filter_search_timer.setSingleShot(True)
@@ -69,12 +74,21 @@ class SearchPanel(QWidget):
         scroll.setWidget(self.filters_widget)
         filters_group_layout.addWidget(scroll)
 
-        # Search and Cancel Buttons
+        # Search, Clear and Cancel Buttons
         self.search_button = QPushButton("Search")
         self.search_button.clicked.connect(self.on_search_clicked)
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.clicked.connect(self.clear_search_inputs)
+        self.clear_button.setVisible(False)  # Initially hidden
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.cancel_triggered.emit)
-        self.cancel_button.setVisible(False) # Initially hidden
+        self.cancel_button.setVisible(False)  # Initially hidden
+
+        # Button layout
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.search_button)
+        button_layout.addWidget(self.clear_button)
+
 
         # Layout
         form_layout = QFormLayout()
@@ -86,9 +100,16 @@ class SearchPanel(QWidget):
         self.layout.addLayout(form_layout)
         self.layout.addWidget(self.filters_group)
         self.layout.addStretch()
-        self.layout.addWidget(self.search_button)
+        self.layout.addLayout(button_layout)
         self.layout.addWidget(self.cancel_button)
 
+    def clear_search_inputs(self):
+        """Clears all search and filter inputs."""
+        self.search_input.clear()
+        self.filter_search_input.clear()
+        for checkbox in self.task_filters.values():
+            checkbox.setChecked(False)
+        self.update_clear_button_visibility()
 
     def on_search_clicked(self):
         search_params = self.get_search_parameters()
@@ -190,8 +211,20 @@ class SearchPanel(QWidget):
         # Create and add a checkbox for each tag
         for tag in sorted(tags): # Sort for consistent UI
             checkbox = QCheckBox(self._format_tag_name(tag))
+            checkbox.stateChanged.connect(self.update_clear_button_visibility)
             self.task_filters[tag] = checkbox
             self.filters_layout.addWidget(checkbox)
 
         # Add a stretch to push checkboxes to the top
         self.filters_layout.addStretch()
+
+    def update_clear_button_visibility(self):
+        """Shows or hides the clear button based on input fields and checkboxes."""
+        has_search_text = bool(self.search_input.text())
+        has_filter_text = bool(self.filter_search_input.text())
+        has_checked_filter = any(
+            cb.isChecked() for cb in self.task_filters.values()
+        )
+        self.clear_button.setVisible(
+            has_search_text or has_filter_text or has_checked_filter
+        )
