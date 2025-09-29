@@ -46,6 +46,7 @@ class SearchPanel(QWidget):
         self.filter_search_input.textChanged.connect(
             self.update_clear_button_visibility
         )
+        self.filter_search_input.textChanged.connect(self.update_select_buttons_text)
 
         self.filter_search_timer = QTimer(self)
         self.filter_search_timer.setSingleShot(True)
@@ -53,6 +54,17 @@ class SearchPanel(QWidget):
         self.filter_search_timer.timeout.connect(self.perform_filter_search)
 
         filters_group_layout.addWidget(self.filter_search_input)
+
+        # Select All / Deselect All buttons
+        self.select_all_button = QPushButton("Select All")
+        self.select_all_button.clicked.connect(self.select_all_filters)
+        self.deselect_all_button = QPushButton("Deselect All")
+        self.deselect_all_button.clicked.connect(self.deselect_all_filters)
+
+        select_buttons_layout = QHBoxLayout()
+        select_buttons_layout.addWidget(self.select_all_button)
+        select_buttons_layout.addWidget(self.deselect_all_button)
+        filters_group_layout.addLayout(select_buttons_layout)
 
         # Scroll Area for checkboxes
         scroll = QScrollArea()
@@ -160,7 +172,28 @@ class SearchPanel(QWidget):
 
         # Show/hide the "No filters found" label
         self.no_filters_found_label.setVisible(not found_match)
+        self.update_select_buttons_text()
 
+    def update_select_buttons_text(self):
+        """Updates the text of the 'Select All'/'Deselect All' buttons."""
+        if self.filter_search_input.text():
+            self.select_all_button.setText("Select All Visible")
+            self.deselect_all_button.setText("Deselect All Visible")
+        else:
+            self.select_all_button.setText("Select All")
+            self.deselect_all_button.setText("Deselect All")
+
+    def select_all_filters(self, select=True):
+        """Selects or deselects all filters."""
+        search_text = self.filter_search_input.text()
+        for checkbox in self.task_filters.values():
+            if not search_text or checkbox.isVisible():
+                checkbox.setChecked(select)
+        self.update_clear_button_visibility()
+
+    def deselect_all_filters(self):
+        """Deselects all filters."""
+        self.select_all_filters(select=False)
 
     def set_enabled(self, enabled):
         """Enable or disable the search panel widgets."""
