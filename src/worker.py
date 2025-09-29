@@ -3,6 +3,8 @@ import traceback
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 
+import inspect
+
 class WorkerSignals(QObject):
     """
     Defines the signals available from a running worker thread.
@@ -11,11 +13,13 @@ class WorkerSignals(QObject):
     - `finished`: Emitted when the task is done.
     - `error`: Emitted when an exception occurs, passing a tuple (type, value, traceback).
     - `result`: Emitted when the task successfully completes, passing the result object.
+    - `progress`: Emitted to update progress, passing two integers (current, total).
     """
 
     finished = Signal()
     error = Signal(tuple)
     result = Signal(object)
+    progress = Signal(int, int)
 
 
 class Worker(QRunnable):
@@ -40,7 +44,20 @@ class Worker(QRunnable):
     def run(self):
         """
         Execute the worker's function with the provided arguments.
+        If the target function accepts a 'progress_callback' keyword argument,
+        it will be provided with a callback that emits the progress signal.
         """
+        # Check if the target function accepts a 'progress_callback' kwarg.
+        try:
+            sig = inspect.signature(self.fn)
+            if 'progress_callback' in sig.parameters:
+                # If it does, inject our progress-emitting callback.
+                self.kwargs['progress_callback'] = self.signals.progress.emit
+        except (ValueError, TypeError):
+            # Some callables (e.g., built-ins) might not support introspection.
+            # In these cases, we just proceed without the callback.
+            pass
+
         try:
             result = self.fn(*self.args, **self.kwargs)
         except Exception:

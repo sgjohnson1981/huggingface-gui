@@ -32,25 +32,14 @@ class SearchPanel(QWidget):
             ["Most Downloads", "Most Likes", "Recently Updated"]
         )
 
-        # Filters (example with a few common tasks)
+        # Filters
         self.filters_group = QGroupBox("Filters")
         self.filters_layout = QVBoxLayout()
+        self.task_filters = {}
 
-        # Example filters - this could be dynamically populated in a future step
-        self.task_filters = {
-            "text-generation": QCheckBox("Text Generation"),
-            "fill-mask": QCheckBox("Fill-Mask"),
-            "token-classification": QCheckBox("Token Classification"),
-            "question-answering": QCheckBox("Question Answering"),
-            "summarization": QCheckBox("Summarization"),
-            "translation": QCheckBox("Translation"),
-            "image-classification": QCheckBox("Image Classification"),
-            "object-detection": QCheckBox("Object Detection"),
-            "audio-classification": QCheckBox("Audio Classification"),
-        }
-
-        for checkbox in self.task_filters.values():
-            self.filters_layout.addWidget(checkbox)
+        # Initially, show a loading message
+        self.loading_label = QLabel("Loading filters...")
+        self.filters_layout.addWidget(self.loading_label)
 
         self.filters_group.setLayout(self.filters_layout)
 
@@ -106,3 +95,31 @@ class SearchPanel(QWidget):
         self.sort_combo.setEnabled(enabled)
         self.filters_group.setEnabled(enabled)
         self.search_button.setEnabled(enabled)
+
+    def _format_tag_name(self, tag):
+        """Formats a tag ID into a human-readable label."""
+        return tag.replace("-", " ").title()
+
+    def populate_filters(self, tags):
+        """
+        Populates the filter group box with checkboxes for each tag.
+        """
+        # Clear the "Loading..." label
+        if self.loading_label:
+            self.filters_layout.removeWidget(self.loading_label)
+            self.loading_label.deleteLater()
+            self.loading_label = None
+
+        if not tags:
+            # If no tags are returned, show an error message
+            self.filters_layout.addWidget(QLabel("Could not load filters."))
+            return
+
+        # Create and add a checkbox for each tag
+        for tag in tags:
+            checkbox = QCheckBox(self._format_tag_name(tag))
+            self.task_filters[tag] = checkbox
+            self.filters_layout.addWidget(checkbox)
+
+        # Add a stretch to push checkboxes to the top
+        self.filters_layout.addStretch()

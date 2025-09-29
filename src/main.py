@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QFileDialog,
     QMessageBox,
+    QProgressBar,
 )
 from .settings_dialog import SettingsDialog
 from .search_panel import SearchPanel
@@ -62,7 +63,35 @@ class MainWindow(QMainWindow):
 
         # Set up Menu Bar and Status Bar
         self.create_menu_bar()
-        self.setStatusBar(QStatusBar(self))
+        self.setup_status_bar()
+
+        # Load dynamic filters on startup
+        self.load_initial_filters()
+
+    def setup_status_bar(self):
+        """
+        Initializes the status bar, including the download progress bar.
+        """
+        self.status_bar = QStatusBar(self)
+        self.setStatusBar(self.status_bar)
+        self.progress_bar = QProgressBar(self.status_bar)
+        self.progress_bar.setVisible(False)
+        self.status_bar.addPermanentWidget(self.progress_bar)
+
+    def load_initial_filters(self):
+        """
+        Starts a background worker to fetch model tags and populate the search filters.
+        """
+        filter_worker = Worker(hf_service.get_model_tags)
+        filter_worker.signals.result.connect(self.search_panel.populate_filters)
+        filter_worker.signals.error.connect(self.on_filter_load_error)
+        self.threadpool.start(filter_worker)
+
+    def on_filter_load_error(self, err):
+        exctype, value, tb = err
+        logger.error(f"Failed to load filters: {value}", exc_info=err)
+        # The search panel will show an error message, but we can also log it.
+        self.search_panel.populate_filters([]) # Pass empty list to show error message
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -156,18 +185,32 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Download Directory Not Set", "Please set a download directory in Settings.")
             return
 
-        self.statusBar().showMessage(f"Downloading {model_id}...")
+        self.status_bar.showMessage(f"Starting download for {model_id}...")
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
         self.details_panel.download_button.setEnabled(False)
 
         worker = Worker(hf_service.download_model, model_id, download_dir)
+        worker.signals.progress.connect(self.on_download_progress)
         worker.signals.result.connect(self.on_download_finished)
         worker.signals.error.connect(self.on_download_error)
+        # Re-enable the button once the worker is completely finished
         worker.signals.finished.connect(lambda: self.details_panel.download_button.setEnabled(True))
         self.threadpool.start(worker)
 
+    def on_download_progress(self, current, total):
+        """
+        Updates the download progress bar.
+        """
+        if total > 0:
+            self.progress_bar.setMaximum(total)
+            self.progress_bar.setValue(current)
+            self.status_bar.showMessage(f"Downloading file {current} of {total}...")
+
     def on_download_finished(self, result):
         success, message = result
-        self.statusBar().showMessage(message, 5000)
+        self.progress_bar.setVisible(False)
+        self.status_bar.showMessage(message, 5000)
         if success:
             logger.info(f"Successfully downloaded. Message: {message}")
             QMessageBox.information(self, "Download Complete", message)
@@ -178,8 +221,9 @@ class MainWindow(QMainWindow):
     def on_download_error(self, err):
         exctype, value, tb = err
         logger.critical(f"An unexpected error occurred during download: {value}", exc_info=err)
+        self.progress_bar.setVisible(False)
         QMessageBox.critical(self, "Download Error", f"An unexpected error occurred: {value}")
-        self.statusBar().showMessage("Download failed.", 5000)
+        self.status_bar.showMessage("Download failed.", 5000)
 
 
 def set_dark_mode(app):
