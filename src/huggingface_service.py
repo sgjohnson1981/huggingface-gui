@@ -215,3 +215,22 @@ def run_download_in_process(queue, model_id, download_dir):
         tb = traceback.format_exc()
         logger.error(f"Error in download process for {model_id}: {e}", exc_info=(exctype, value, tb))
         queue.put(('error', (exctype, str(value), tb)))
+
+
+def run_search_in_process(queue, search_params):
+    """
+    A top-level function to be run in a separate process for searching models.
+    It communicates results or errors back through a queue.
+    """
+    import sys
+    import traceback
+
+    try:
+        service = HuggingFaceService()
+        results = service.search_models(**search_params)
+        queue.put(('result', results))
+    except Exception as e:
+        exctype, value = sys.exc_info()[:2]
+        tb = traceback.format_exc()
+        logger.error(f"Error in search process: {e}", exc_info=(exctype, value, tb))
+        queue.put(('error', (exctype, str(value), tb)))

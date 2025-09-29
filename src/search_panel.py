@@ -15,6 +15,7 @@ from PySide6.QtCore import Signal, QTimer
 
 class SearchPanel(QWidget):
     search_triggered = Signal(dict)
+    cancel_triggered = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -68,9 +69,12 @@ class SearchPanel(QWidget):
         scroll.setWidget(self.filters_widget)
         filters_group_layout.addWidget(scroll)
 
-        # Search Button
+        # Search and Cancel Buttons
         self.search_button = QPushButton("Search")
         self.search_button.clicked.connect(self.on_search_clicked)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.cancel_triggered.emit)
+        self.cancel_button.setVisible(False) # Initially hidden
 
         # Layout
         form_layout = QFormLayout()
@@ -83,6 +87,8 @@ class SearchPanel(QWidget):
         self.layout.addWidget(self.filters_group)
         self.layout.addStretch()
         self.layout.addWidget(self.search_button)
+        self.layout.addWidget(self.cancel_button)
+
 
     def on_search_clicked(self):
         search_params = self.get_search_parameters()
@@ -141,6 +147,12 @@ class SearchPanel(QWidget):
         self.sort_combo.setEnabled(enabled)
         self.filters_group.setEnabled(enabled)
         self.search_button.setEnabled(enabled)
+
+    def set_searching_state(self, searching):
+        """Toggles the UI between searching and idle states."""
+        self.set_enabled(not searching)
+        self.search_button.setVisible(not searching)
+        self.cancel_button.setVisible(searching)
 
     def _format_tag_name(self, tag):
         """Formats a tag ID into a human-readable label."""

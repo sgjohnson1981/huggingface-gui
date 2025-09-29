@@ -174,3 +174,20 @@ Traceback (most recent call last):
   File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/unittest/mock.py", line 1198, in _execute_mock_call
     raise effect
 Exception: API Failure
+2025-09-29 20:30:51,330 - HuggingFaceGUI - WARNING - Cache directory not found for model non-existent/model at /home/jules/.cache/huggingface/hub/models--non-existent--model. No action taken.
+2025-09-29 20:30:51,333 - HuggingFaceGUI - INFO - Deleting cache directory: /home/jules/.cache/huggingface/hub/models--org--model-name
+2025-09-29 20:30:51,334 - HuggingFaceGUI - INFO - Successfully deleted cache for model org/model-name.
+2025-09-29 20:30:51,342 - HuggingFaceGUI - ERROR - An error occurred while searching for models: API Failure
+Traceback (most recent call last):
+  File "/app/src/huggingface_service.py", line 52, in search_models
+    models = self._api.list_models(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/unittest/mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/unittest/mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/unittest/mock.py", line 1198, in _execute_mock_call
+    raise effect
+Exception: API Failure

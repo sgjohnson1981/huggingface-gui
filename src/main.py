@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 from .settings_dialog import SettingsDialog
 from .search_panel import SearchPanel
-from .huggingface_service import hf_service, run_download_in_process
+from .huggingface_service import hf_service, run_download_in_process, run_search_in_process
 from .results_table import ResultsTableView, ResultsTableModel
 from .model_details_panel import ModelDetailsPanel
 from .config_manager import config_manager
@@ -36,12 +36,18 @@ class MainWindow(QMainWindow):
         logger.info(f"Multithreading with maximum {self.threadpool.maxThreadCount()} threads")
         self.current_download_worker = None
         self.current_download_model_id = None
+        self.current_search_worker = None
         self.cached_tags = []
 
         # Timer to check the download queue
-        self.queue_timer = QTimer(self)
-        self.queue_timer.setInterval(100)  # Check every 100ms
-        self.queue_timer.timeout.connect(self.process_download_queue)
+        self.download_queue_timer = QTimer(self)
+        self.download_queue_timer.setInterval(100)
+        self.download_queue_timer.timeout.connect(self.process_download_queue)
+
+        # Timer to check the search queue
+        self.search_queue_timer = QTimer(self)
+        self.search_queue_timer.setInterval(100)
+        self.search_queue_timer.timeout.connect(self.process_search_queue)
 
 
         # Create main layout
@@ -54,6 +60,7 @@ class MainWindow(QMainWindow):
         self.search_panel.setFixedWidth(300)
         main_layout.addWidget(self.search_panel)
         self.search_panel.search_triggered.connect(self.perform_search)
+        self.search_panel.cancel_triggered.connect(self.cancel_search)
 
         # Right Panel: Results and Details
         right_panel = QWidget()
@@ -106,6 +113,33 @@ class MainWindow(QMainWindow):
 
         self.status_bar.addPermanentWidget(self.status_bar_widget)
 
+    def process_search_queue(self):
+        """
+        Processes messages from the search worker's queue.
+        """
+        if not self.current_search_worker:
+            return
+
+        try:
+            while not self.current_search_worker.queue.empty():
+                message_type, data = self.current_search_worker.queue.get_nowait()
+
+                if message_type == 'result':
+                    self.on_search_finished(data)
+                elif message_type == 'error':
+                    self.on_search_error(data)
+
+        except Exception as e:
+            logger.error(f"Error processing search queue: {e}", exc_info=True)
+        finally:
+            # Ensure the timer is stopped and state is reset if the worker is no longer running
+            if not self.current_search_worker or not self.current_search_worker.is_running():
+                self.search_queue_timer.stop()
+                self.search_panel.set_searching_state(False)
+                if self.current_search_worker: # If it finished or crashed
+                    self.current_search_worker = None
+
+
     def process_download_queue(self):
         """
         Processes messages from the download worker's queue.
@@ -123,14 +157,14 @@ class MainWindow(QMainWindow):
                     self.on_download_progress(*data)
                 elif message_type == 'result':
                     self.on_download_finished(data)
-                    self.queue_timer.stop() # Stop polling when finished
+                    self.download_queue_timer.stop() # Stop polling when finished
                 elif message_type == 'error':
                     self.on_download_error(data)
-                    self.queue_timer.stop() # Stop polling when finished
+                    self.download_queue_timer.stop() # Stop polling when finished
 
         except Exception as e:
             logger.error(f"Error processing download queue: {e}", exc_info=True)
-            self.queue_timer.stop()
+            self.download_queue_timer.stop()
 
 
     def load_initial_filters(self):
@@ -211,25 +245,46 @@ class MainWindow(QMainWindow):
             hf_service.connect()
 
     def perform_search(self, search_params):
-        self.statusBar().showMessage("Searching for models...")
-        self.search_panel.set_enabled(False)
+        if self.current_search_worker and self.current_search_worker.is_running():
+            QMessageBox.warning(self, "Search in Progress", "A search is already in progress. Please cancel it before starting a new one.")
+            return
 
-        worker = Worker(hf_service.search_models, **search_params)
-        worker.signals.result.connect(self.on_search_finished)
-        worker.signals.error.connect(self.on_search_error)
-        worker.signals.finished.connect(lambda: self.search_panel.set_enabled(True))
-        self.threadpool.start(worker)
+        self.statusBar().showMessage("Searching for models...")
+        self.search_panel.set_searching_state(True)
+        self.results_model.set_data([]) # Clear previous results
+        self.details_panel.clear_details()
+
+        self.current_search_worker = DownloadWorker(
+            target=run_search_in_process,
+            args=(search_params,)
+        )
+        self.current_search_worker.start()
+        self.search_queue_timer.start()
+
+
+    def cancel_search(self):
+        """Cancels the currently running search."""
+        if self.current_search_worker and self.current_search_worker.is_running():
+            logger.info("User cancelled search.")
+            self.current_search_worker.stop()
+            self.search_queue_timer.stop()
+            self.current_search_worker = None
+            self.search_panel.set_searching_state(False)
+            self.statusBar().showMessage("Search cancelled.", 3000)
 
     def on_search_finished(self, results):
         self.statusBar().showMessage(f"Found {len(results)} models.")
         self.results_model.set_data(results)
         self.details_panel.clear_details()
+        # The worker/timer will be stopped in the process_search_queue method
+        # which is called right after this one.
 
     def on_search_error(self, err):
         exctype, value, tb = err
         logger.error(f"Search failed: {value}", exc_info=err)
         QMessageBox.critical(self, "Search Error", f"An unexpected error occurred during search: {value}")
         self.statusBar().showMessage("Search failed.", 5000)
+        # The worker/timer will be stopped in the process_search_queue method.
 
     def on_model_selected(self, selected, deselected):
         if not selected.indexes():
@@ -290,7 +345,7 @@ class MainWindow(QMainWindow):
             args=(model_id, download_dir)
         )
         self.current_download_worker.start()
-        self.queue_timer.start()
+        self.download_queue_timer.start()
 
     def on_download_progress(self, current, total):
         if total > 0:
@@ -302,7 +357,7 @@ class MainWindow(QMainWindow):
         if self.current_download_worker and self.current_download_worker.is_running():
             logger.info(f"Attempting to cancel download for model: {self.current_download_model_id}")
             self.current_download_worker.stop()
-            self.queue_timer.stop()
+            self.download_queue_timer.stop()
             hf_service.delete_model_cache(self.current_download_model_id)
             self.status_bar.showMessage("Download cancelled.", 5000)
             self.progress_bar.setVisible(False)
