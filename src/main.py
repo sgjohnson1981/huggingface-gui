@@ -1,4 +1,5 @@
 import sys
+from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -18,6 +19,7 @@ from .results_table import ResultsTableView, ResultsTableModel
 from .model_details_panel import ModelDetailsPanel
 from .config_manager import config_manager
 from .logging_config import logger
+from .worker import Worker
 
 
 class MainWindow(QMainWindow):
@@ -26,6 +28,9 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Hugging Face Model Hub Explorer")
         self.setGeometry(100, 100, 1200, 800)
+        self.threadpool = QThreadPool()
+        logger.info(f"Multithreading with maximum {self.threadpool.maxThreadCount()} threads")
+
 
         # Create main layout
         main_widget = QWidget()
@@ -87,19 +92,24 @@ class MainWindow(QMainWindow):
 
     def perform_search(self, search_params):
         self.statusBar().showMessage("Searching for models...")
-        # This should be run in a separate thread in a real app to avoid freezing the GUI
-        # For now, we'll run it directly
-        try:
-            logger.info(f"Performing search with params: {search_params}")
-            results = hf_service.search_models(**search_params)
-            self.statusBar().showMessage(f"Found {len(results)} models.")
-            self.results_model.set_data(results)
-        except Exception as e:
-            logger.error(f"Search failed: {e}", exc_info=True)
-            QMessageBox.critical(self, "Search Error", f"An unexpected error occurred during search: {e}")
-            self.statusBar().showMessage("Search failed.", 5000)
-        finally:
-            self.details_panel.clear_details()
+        self.search_panel.set_enabled(False)
+
+        worker = Worker(hf_service.search_models, **search_params)
+        worker.signals.result.connect(self.on_search_finished)
+        worker.signals.error.connect(self.on_search_error)
+        worker.signals.finished.connect(lambda: self.search_panel.set_enabled(True))
+        self.threadpool.start(worker)
+
+    def on_search_finished(self, results):
+        self.statusBar().showMessage(f"Found {len(results)} models.")
+        self.results_model.set_data(results)
+        self.details_panel.clear_details()
+
+    def on_search_error(self, err):
+        exctype, value, tb = err
+        logger.error(f"Search failed: {value}", exc_info=err)
+        QMessageBox.critical(self, "Search Error", f"An unexpected error occurred during search: {value}")
+        self.statusBar().showMessage("Search failed.", 5000)
 
     def on_model_selected(self, selected, deselected):
         if not selected.indexes():
@@ -107,50 +117,69 @@ class MainWindow(QMainWindow):
 
         source_index = self.results_table.model().mapToSource(selected.indexes()[0])
         model_info = self.results_model._data[source_index.row()]
+        model_id = model_info.id
 
-        self.statusBar().showMessage(f"Fetching details for {model_info.id}...")
-        # In a real app, this should be in a thread
-        try:
-            logger.info(f"Fetching details for model: {model_info.id}")
-            readme = hf_service.get_model_readme(model_info.id)
-            self.details_panel.set_model_details(model_info, readme)
-            self.statusBar().showMessage(f"Details loaded for {model_info.id}.", 3000)
-        except Exception as e:
-            logger.error(f"Failed to fetch model details for {model_info.id}: {e}", exc_info=True)
-            QMessageBox.warning(self, "Error", f"Could not fetch model details: {e}")
-            self.statusBar().showMessage("Failed to load details.", 5000)
+        self.statusBar().showMessage(f"Fetching details for {model_id}...")
+
+        worker = Worker(hf_service.get_model_readme, model_id)
+        # Pass model_info to the result handler using a lambda
+        worker.signals.result.connect(lambda readme: self.on_details_finished(model_info, readme))
+        worker.signals.error.connect(self.on_details_error)
+        self.threadpool.start(worker)
+
+    def on_details_finished(self, model_info, readme):
+        self.details_panel.set_model_details(model_info, readme)
+        self.statusBar().showMessage(f"Details loaded for {model_info.id}.", 3000)
+
+    def on_details_error(self, err):
+        exctype, value, tb = err
+        logger.error(f"Failed to fetch model details: {value}", exc_info=err)
+        QMessageBox.warning(self, "Error", f"Could not fetch model details: {value}")
+        self.statusBar().showMessage("Failed to load details.", 5000)
+
 
     def on_download_clicked(self):
         model_id = self.details_panel.current_model_id
         if not model_id:
             return
 
-        try:
-            if config_manager.get('prompt_for_download'):
-                download_dir = QFileDialog.getExistingDirectory(self, "Select Download Directory")
-                if not download_dir:
-                    logger.info("User cancelled download dialog.")
-                    return  # User cancelled
-            else:
-                download_dir = config_manager.get('download_dir')
+        download_dir = None
+        if config_manager.get('prompt_for_download'):
+            download_dir = QFileDialog.getExistingDirectory(self, "Select Download Directory")
+            if not download_dir:
+                logger.info("User cancelled download dialog.")
+                return
+        else:
+            download_dir = config_manager.get('download_dir')
 
-            self.statusBar().showMessage(f"Downloading {model_id}...")
-            logger.info(f"Starting download for model {model_id} to directory {download_dir}")
+        if not download_dir:
+            QMessageBox.warning(self, "Download Directory Not Set", "Please set a download directory in Settings.")
+            return
 
-            # This should also be in a thread
-            success, message = hf_service.download_model(model_id, download_dir)
-            self.statusBar().showMessage(message, 5000)
+        self.statusBar().showMessage(f"Downloading {model_id}...")
+        self.details_panel.download_button.setEnabled(False)
 
-            if success:
-                logger.info(f"Successfully downloaded model {model_id}.")
-                QMessageBox.information(self, "Download Complete", message)
-            else:
-                logger.error(f"Download failed for model {model_id}. Reason: {message}")
-                QMessageBox.warning(self, "Download Failed", message)
-        except Exception as e:
-            logger.critical(f"An unexpected error occurred during download for {model_id}: {e}", exc_info=True)
-            QMessageBox.critical(self, "Download Error", f"An unexpected error occurred: {e}")
-            self.statusBar().showMessage("Download failed.", 5000)
+        worker = Worker(hf_service.download_model, model_id, download_dir)
+        worker.signals.result.connect(self.on_download_finished)
+        worker.signals.error.connect(self.on_download_error)
+        worker.signals.finished.connect(lambda: self.details_panel.download_button.setEnabled(True))
+        self.threadpool.start(worker)
+
+    def on_download_finished(self, result):
+        success, message = result
+        self.statusBar().showMessage(message, 5000)
+        if success:
+            logger.info(f"Successfully downloaded. Message: {message}")
+            QMessageBox.information(self, "Download Complete", message)
+        else:
+            logger.error(f"Download failed. Reason: {message}")
+            QMessageBox.warning(self, "Download Failed", message)
+
+    def on_download_error(self, err):
+        exctype, value, tb = err
+        logger.critical(f"An unexpected error occurred during download: {value}", exc_info=err)
+        QMessageBox.critical(self, "Download Error", f"An unexpected error occurred: {value}")
+        self.statusBar().showMessage("Download failed.", 5000)
 
 
 def set_dark_mode(app):

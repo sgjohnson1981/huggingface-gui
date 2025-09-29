@@ -99,3 +99,10 @@ class SearchPanel(QWidget):
             "direction": -1,  # Always descending for these sort options
             "filters": selected_filters,
         }
+
+    def set_enabled(self, enabled):
+        """Enable or disable the search panel widgets."""
+        self.search_input.setEnabled(enabled)
+        self.sort_combo.setEnabled(enabled)
+        self.filters_group.setEnabled(enabled)
+        self.search_button.setEnabled(enabled)

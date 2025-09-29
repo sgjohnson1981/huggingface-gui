@@ -1,0 +1,24 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment and packaging
+.env
+.venv
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Project-specific
+logs/
+config.json
+*.db
+*.sqlite3
+
+# OS-specific
+.DS_Store
+Thumbs.db
