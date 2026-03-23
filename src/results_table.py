@@ -27,7 +27,10 @@ class ResultsTableModel(QAbstractTableModel):
             return None
 
         if role == Qt.DisplayRole:
-            row_data = self._data[index.row()]
+            row = index.row()
+            if row < 0 or row >= len(self._data):
+                return None
+            row_data = self._data[row]
             visible_col_index = self._get_visible_column_index(index.column())
 
             if visible_col_index == 0:

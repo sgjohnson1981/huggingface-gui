@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
         self.current_download_model_id = None
         self.current_search_worker = None
         self.cached_tags = []
+        self.active_details_workers = set() # Keep references to detail workers
 
         # Timer to check the download queue
         self.download_queue_timer = QTimer(self)
@@ -371,22 +372,37 @@ class MainWindow(QMainWindow):
             return
 
         source_index = self.results_table.model().mapToSource(selected.indexes()[0])
+        if not source_index.isValid():
+            return
+
+        # Double check row range to prevent IndexError
+        if source_index.row() >= len(self.results_model._data) or source_index.row() < 0:
+            logger.warning(f"Selected row {source_index.row()} is out of range.")
+            return
+
         model_info = self.results_model._data[source_index.row()]
-        model_id = model_info.id
+        model_id = getattr(model_info, 'id', None)
+        if not model_id:
+            logger.error("Selected model info has no ID.")
+            return
 
         self.statusBar().showMessage(f"Fetching details for {model_id}...")
 
         worker = Worker(hf_service.get_model_readme, model_id)
         # Pass model_info to the result handler using a lambda
-        worker.signals.result.connect(lambda readme: self.on_details_finished(model_info, readme))
-        worker.signals.error.connect(self.on_details_error)
+        worker.signals.result.connect(lambda readme, m=model_info, w=worker: self.on_details_finished(m, readme, w))
+        worker.signals.error.connect(lambda err, w=worker: self.on_details_error(err, w))
+        worker.signals.finished.connect(lambda w=worker: self.active_details_workers.discard(w))
+        
+        # Keep a reference to prevent GC
+        self.active_details_workers.add(worker)
         self.threadpool.start(worker)
 
-    def on_details_finished(self, model_info, readme):
+    def on_details_finished(self, model_info, readme, worker=None):
         self.details_panel.set_model_details(model_info, readme)
         self.statusBar().showMessage(f"Details loaded for {model_info.id}.", 3000)
 
-    def on_details_error(self, err):
+    def on_details_error(self, err, worker=None):
         exctype, value, tb = err
         logger.error(f"Failed to fetch model details: {value}", exc_info=err)
         QMessageBox.warning(self, "Error", f"Could not fetch model details: {value}")

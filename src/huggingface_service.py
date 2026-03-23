@@ -5,6 +5,7 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 from huggingface_hub.utils import HfHubHTTPError
 import requests
+import threading
 from .config_manager import config_manager
 from .logging_config import logger
 
@@ -12,23 +13,25 @@ class HuggingFaceService:
     def __init__(self):
         self._api = None
         self._token = None
+        self._lock = threading.Lock()
         self.connect()
 
     def connect(self):
         """
         Connects to the Hugging Face Hub API using the stored token.
         """
-        token = config_manager.get('hf_token')
-        if token and token != self._token:
-            self._token = token
-            self._api = HfApi(token=self._token)
-        elif not token and self._token is not None:
-            # Token was removed
-            self._token = None
-            self._api = HfApi()
-        elif self._api is None:
-            # First time connection
-            self._api = HfApi()
+        with self._lock:
+            token = config_manager.get('hf_token')
+            if token and token != self._token:
+                self._token = token
+                self._api = HfApi(token=self._token)
+            elif not token and self._token is not None:
+                # Token was removed
+                self._token = None
+                self._api = HfApi()
+            elif self._api is None:
+                # First time connection
+                self._api = HfApi()
 
     def search_models(self, search_query=None, sort=None, limit=None, filters=None, **kwargs):
         """
