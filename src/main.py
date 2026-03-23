@@ -1,5 +1,5 @@
 import sys
-from PySide6.QtCore import QThreadPool, QTimer
+from PySide6.QtCore import QThreadPool, QTimer, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSplitter,
 )
 from .settings_dialog import SettingsDialog
 from .search_panel import SearchPanel
@@ -54,30 +55,49 @@ class MainWindow(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Main Splitter: Left (Search) vs Right (Table & Details)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        main_layout.addWidget(self.main_splitter)
 
         # Left Panel: Search and Filter
         self.search_panel = SearchPanel()
-        self.search_panel.setFixedWidth(300)
-        main_layout.addWidget(self.search_panel)
+        self.search_panel.setMinimumWidth(250)
+        self.main_splitter.addWidget(self.search_panel)
         self.search_panel.search_triggered.connect(self.perform_search)
         self.search_panel.cancel_triggered.connect(self.cancel_search)
 
-        # Right Panel: Results and Details
-        right_panel = QWidget()
-        right_panel_layout = QVBoxLayout(right_panel)
-        main_layout.addWidget(right_panel)
+        # Right Panel: Results and Details (Vertical Splitter)
+        self.right_splitter = QSplitter(Qt.Vertical)
+        self.main_splitter.addWidget(self.right_splitter)
 
         # Top Right: Search Results
         self.results_table = ResultsTableView()
         self.results_model = ResultsTableModel()
         self.results_table.set_model(self.results_model)
         self.results_table.selectionModel().selectionChanged.connect(self.on_model_selected)
-        right_panel_layout.addWidget(self.results_table)
+        self.right_splitter.addWidget(self.results_table)
 
         # Bottom Right: Model Details
         self.details_panel = ModelDetailsPanel()
         self.details_panel.download_button.clicked.connect(self.on_download_clicked)
-        right_panel_layout.addWidget(self.details_panel)
+        self.right_splitter.addWidget(self.details_panel)
+
+        # Set stretch factors:
+        # 0: Search panel (doesn't grow horizontally by default)
+        # 1: Right panel (grows to fill horizontal space)
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+
+        # Results table and details panel should both grow
+        self.right_splitter.setStretchFactor(0, 1)
+        self.right_splitter.setStretchFactor(1, 1)
+
+        # Set initial proportions
+        self.right_splitter.setSizes([480, 320])
+        self.main_splitter.setSizes([300, 900])
 
         # Set up Menu Bar and Status Bar
         self.create_menu_bar()
@@ -479,6 +499,15 @@ def set_dark_mode(app):
             background-color: #2b2b2b;
             color: #ffffff;
             border: none;
+        }
+        QSplitter::handle {
+            background-color: #323232;
+        }
+        QSplitter::handle:horizontal {
+            width: 3px;
+        }
+        QSplitter::handle:vertical {
+            height: 3px;
         }
         QMainWindow, QDialog {
             background-color: #2b2b2b;

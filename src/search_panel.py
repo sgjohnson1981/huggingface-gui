@@ -109,8 +109,7 @@ class SearchPanel(QWidget):
         form_layout.addRow(self.sort_combo)
 
         self.layout.addLayout(form_layout)
-        self.layout.addWidget(self.filters_group)
-        self.layout.addStretch()
+        self.layout.addWidget(self.filters_group, 1)  # Allow filter list to expand
         self.layout.addLayout(button_layout)
         self.layout.addWidget(self.cancel_button)
 
