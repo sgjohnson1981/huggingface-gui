@@ -33,15 +33,17 @@ class ResultsTableModel(QAbstractTableModel):
             if visible_col_index == 0:
                 return row_data.id
             elif visible_col_index == 1:
-                return row_data.author
+                return getattr(row_data, 'author', 'N/A') or 'N/A'
             elif visible_col_index == 2:
-                return getattr(row_data, 'pipeline_tag', 'N/A')
+                return getattr(row_data, 'pipeline_tag', 'N/A') or 'N/A'
             elif visible_col_index == 3:
-                return row_data.downloads
+                return getattr(row_data, 'downloads', 0)
             elif visible_col_index == 4:
-                return row_data.likes
+                return getattr(row_data, 'likes', 0)
             elif visible_col_index == 5:
-                return row_data.lastModified.strftime("%Y-%m-%d")
+                if hasattr(row_data, 'lastModified') and row_data.lastModified:
+                    return row_data.lastModified.strftime("%Y-%m-%d")
+                return "N/A"
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
@@ -92,6 +94,7 @@ class ResultsTableView(QTableView):
         self.setSelectionBehavior(QTableView.SelectRows)
         self.setSelectionMode(QTableView.SingleSelection)
         self.setEditTriggers(QTableView.NoEditTriggers)
+        self.setAlternatingRowColors(True)
 
         self.horizontalHeader().setContextMenuPolicy(Qt.CustomContextMenu)
         self.horizontalHeader().customContextMenuRequested.connect(self.header_context_menu)

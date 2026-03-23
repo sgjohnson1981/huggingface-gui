@@ -224,14 +224,74 @@ class MainWindow(QMainWindow):
 
         # Edit Menu
         edit_menu = menu_bar.addMenu("Edit")
+        undo_action = edit_menu.addAction("Undo")
+        undo_action.setShortcut("Ctrl+Z")
+        undo_action.triggered.connect(lambda: self.on_edit_action("undo"))
+        
+        redo_action = edit_menu.addAction("Redo")
+        redo_action.setShortcut("Ctrl+Y")
+        redo_action.triggered.connect(lambda: self.on_edit_action("redo"))
+        
+        edit_menu.addSeparator()
+        
+        cut_action = edit_menu.addAction("Cut")
+        cut_action.setShortcut("Ctrl+X")
+        cut_action.triggered.connect(lambda: self.on_edit_action("cut"))
+        
+        copy_action = edit_menu.addAction("Copy")
+        copy_action.setShortcut("Ctrl+C")
+        copy_action.triggered.connect(lambda: self.on_edit_action("copy"))
+        
+        paste_action = edit_menu.addAction("Paste")
+        paste_action.setShortcut("Ctrl+V")
+        paste_action.triggered.connect(lambda: self.on_edit_action("paste"))
+        
+        edit_menu.addSeparator()
+        
+        select_all_action = edit_menu.addAction("Select All")
+        select_all_action.setShortcut("Ctrl+A")
+        select_all_action.triggered.connect(lambda: self.on_edit_action("select_all"))
 
         # View Menu
         view_menu = menu_bar.addMenu("View")
+        self.toggle_search_action = view_menu.addAction("Show Search Panel")
+        self.toggle_search_action.setCheckable(True)
+        self.toggle_search_action.setChecked(True)
+        self.toggle_search_action.triggered.connect(self.toggle_search_panel)
+        
+        refresh_action = view_menu.addAction("Refresh Filters")
+        refresh_action.setShortcut("F5")
+        refresh_action.triggered.connect(self.load_initial_filters)
 
         # Help Menu
         help_menu = menu_bar.addMenu("Help")
         about_action = help_menu.addAction("About")
         about_action.triggered.connect(self.open_about_dialog)
+
+    def on_edit_action(self, action_name):
+        """
+        Dispatches standard Edit actions to the focused widget if it supports them.
+        """
+        widget = QApplication.focusWidget()
+        if not widget:
+            return
+            
+        if action_name == "undo" and hasattr(widget, 'undo'):
+            widget.undo()
+        elif action_name == "redo" and hasattr(widget, 'redo'):
+            widget.redo()
+        elif action_name == "cut" and hasattr(widget, 'cut'):
+            widget.cut()
+        elif action_name == "copy" and hasattr(widget, 'copy'):
+            widget.copy()
+        elif action_name == "paste" and hasattr(widget, 'paste'):
+            widget.paste()
+        elif action_name == "select_all" and hasattr(widget, 'selectAll'):
+            widget.selectAll()
+
+    def toggle_search_panel(self, checked):
+        self.search_panel.setVisible(checked)
+        self.toggle_search_action.setText("Show Search Panel" if not checked else "Hide Search Panel")
 
     def open_about_dialog(self):
         from .about_dialog import AboutDialog
@@ -394,21 +454,43 @@ class MainWindow(QMainWindow):
 
 
 def set_dark_mode(app):
+    from PySide6.QtGui import QPalette, QColor
+    
+    # Set Palette for specific items like PlaceholderText
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor(43, 43, 43))
+    palette.setColor(QPalette.WindowText, QColor(255, 255, 255))
+    palette.setColor(QPalette.Base, QColor(30, 30, 30))
+    palette.setColor(QPalette.AlternateBase, QColor(45, 45, 45))
+    palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 255))
+    palette.setColor(QPalette.ToolTipText, QColor(255, 255, 255))
+    palette.setColor(QPalette.Text, QColor(255, 255, 255))
+    palette.setColor(QPalette.Button, QColor(60, 60, 60))
+    palette.setColor(QPalette.ButtonText, QColor(255, 255, 255))
+    palette.setColor(QPalette.BrightText, QColor(255, 0, 0))
+    palette.setColor(QPalette.Link, QColor(42, 130, 218))
+    palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+    palette.setColor(QPalette.PlaceholderText, QColor(120, 120, 120))
+    app.setPalette(palette)
+
     dark_stylesheet = """
         QWidget {
             background-color: #2b2b2b;
             color: #ffffff;
-            border: 1px solid #323232;
+            border: none;
         }
-        QMainWindow {
+        QMainWindow, QDialog {
             background-color: #2b2b2b;
         }
         QMenuBar {
             background-color: #3c3c3c;
+            border-bottom: 1px solid #1e1e1e;
         }
         QMenuBar::item {
             background-color: #3c3c3c;
             color: #ffffff;
+            padding: 4px 10px;
         }
         QMenuBar::item::selected {
             background-color: #555555;
@@ -417,14 +499,82 @@ def set_dark_mode(app):
             background-color: #3c3c3c;
             border: 1px solid #454545;
         }
+        QMenu::item {
+            padding: 4px 20px;
+        }
         QMenu::item::selected {
             background-color: #555555;
         }
-        QLabel {
+        QLineEdit, QComboBox, QAbstractSpinBox {
+            background-color: #1e1e1e;
+            border: 1px solid #555555;
+            border-radius: 4px;
+            padding: 5px;
+            color: #ffffff;
+        }
+        QLineEdit:focus, QComboBox:focus {
+            border: 1px solid #2a82da;
+        }
+        QGroupBox {
+            border: 1px solid #555555;
+            border-radius: 6px;
+            margin-top: 1.1em;
+            padding-top: 0.5em;
+            font-weight: bold;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            subcontrol-position: top center;
+            padding: 0 3px;
+        }
+        QPushButton {
+            background-color: #454545;
+            border: 1px solid #555555;
+            border-radius: 4px;
+            padding: 6px 12px;
+            min-width: 80px;
+        }
+        QPushButton:hover {
+            background-color: #555555;
+        }
+        QPushButton:pressed {
+            background-color: #353535;
+        }
+        QPushButton:disabled {
+            background-color: #323232;
+            color: #777777;
+        }
+        QHeaderView::section {
+            background-color: #3c3c3c;
+            color: #ffffff;
+            padding: 4px;
+            border: 1px solid #1e1e1e;
+        }
+        QTableView {
+            background-color: #1e1e1e;
+            alternate-background-color: #252525;
+            gridline-color: #323232;
+            selection-background-color: #2a82da;
+            border: 1px solid #555555;
+        }
+        QScrollBar:vertical {
             border: none;
+            background: #2b2b2b;
+            width: 14px;
+            margin: 0px 0px 0px 0px;
+        }
+        QScrollBar::handle:vertical {
+            background: #454545;
+            min-height: 20px;
+            border-radius: 7px;
+            margin: 2px;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
         }
         QStatusBar {
             background-color: #3c3c3c;
+            border-top: 1px solid #1e1e1e;
         }
     """
     app.setStyleSheet(dark_stylesheet)

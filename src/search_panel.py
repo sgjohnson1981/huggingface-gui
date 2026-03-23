@@ -104,7 +104,6 @@ class SearchPanel(QWidget):
 
         # Layout
         form_layout = QFormLayout()
-        form_layout.addRow(QLabel("Search:"))
         form_layout.addRow(self.search_input)
         form_layout.addRow(QLabel("Sort by:"))
         form_layout.addRow(self.sort_combo)

@@ -17,6 +17,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
+        self.setMinimumSize(600, 350)
 
         self.layout = QVBoxLayout(self)
         self.form_layout = QFormLayout()
