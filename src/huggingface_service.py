@@ -4,6 +4,7 @@ from pathlib import Path
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 from huggingface_hub.utils import HfHubHTTPError
+import requests
 from .config_manager import config_manager
 from .logging_config import logger
 
@@ -29,33 +30,29 @@ class HuggingFaceService:
             # First time connection
             self._api = HfApi()
 
-    def search_models(self, search_query=None, sort=None, direction=None, limit=None, filters=None):
+    def search_models(self, search_query=None, sort=None, limit=None, filters=None, **kwargs):
         """
         Searches for models on the Hugging Face Hub.
 
         Args:
             search_query (str, optional): The search query. Defaults to None.
             sort (str, optional): The field to sort by (e.g., 'downloads', 'likes'). Defaults to None.
-            direction (int, optional): Sort direction (-1 for descending, 1 for ascending). Defaults to None.
             limit (int, optional): The maximum number of results to return. Defaults to None.
             filters (list, optional): A list of filters to apply (e.g., 'text-generation'). Defaults to None.
+            **kwargs: Additional arguments (like 'direction' which is ignored).
 
         Returns:
             list: A list of ModelInfo objects.
         """
         self.connect()  # Ensure the connection is up-to-date with the latest token
 
-        # The HfApi().list_models uses 'search' for the query, and 'filter' for tags.
-        # It's a bit confusing. 'filter' is a list of tags. 'search' is a string query.
-
         try:
             models = self._api.list_models(
                 search=search_query,
                 sort=sort,
-                direction=direction,
                 limit=limit,
                 filter=filters,
-                full=False,  # We don't need full model info for the list view
+                full=False,
             )
             return list(models)
         except Exception as e:
@@ -68,20 +65,17 @@ class HuggingFaceService:
         """
         self.connect()
         try:
-            url = "https://huggingface.co/api/models-tags"
-            # Use the session from the HfApi client for connection pooling and auth
-            response = self._api._session.get(url)
-            response.raise_for_status()
-            tags_data = response.json()
-            if 'pipeline_tag' in tags_data and isinstance(tags_data['pipeline_tag'], list):
-                # Sort for consistent ordering in the UI
-                return sorted(tags_data['pipeline_tag'])
-            else:
-                logger.error("'pipeline_tag' not found or not a list in API response.")
-                return []
+            # Use the library's built-in method which handles auth and sessions correctly
+            tags_dict = self._api.get_model_tags()
+            if 'pipeline_tag' in tags_dict:
+                # The data is a list of Namespace objects or dicts: {'id': 'text-classification', ...}
+                tag_ids = [t['id'] for t in tags_dict['pipeline_tag'] if isinstance(t, dict) and 'id' in t]
+                return sorted([str(tid) for tid in tag_ids if tid])
+            
+            logger.error("'pipeline_tag' not found in model tags.")
+            return []
         except Exception as e:
-            # Catching a broad exception because the underlying library could raise anything
-            logger.error(f"An unexpected error occurred while fetching model tags: {e}", exc_info=True)
+            logger.error(f"Failed to fetch model tags via HfApi: {e}")
             return []
 
     def get_model_readme(self, model_id):
