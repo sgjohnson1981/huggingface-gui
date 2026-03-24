@@ -29,6 +29,11 @@ class SearchPanel(QWidget):
         self.search_input.setPlaceholderText("Search for models...")
         self.search_input.textChanged.connect(self.update_clear_button_visibility)
 
+        # Full Text Search Checkbox
+        self.full_text_checkbox = QCheckBox("Full-text search (READMEs)")
+        self.full_text_checkbox.setToolTip("Search within model cards/READMEs instead of just by title/ID.")
+        self.full_text_checkbox.stateChanged.connect(self.update_clear_button_visibility)
+
         # Sorting
         self.sort_combo = QComboBox()
         self.sort_combo.addItems(
@@ -105,6 +110,7 @@ class SearchPanel(QWidget):
         # Layout
         form_layout = QFormLayout()
         form_layout.addRow(self.search_input)
+        form_layout.addRow(self.full_text_checkbox)
         form_layout.addRow(QLabel("Sort by:"))
         form_layout.addRow(self.sort_combo)
 
@@ -116,6 +122,7 @@ class SearchPanel(QWidget):
     def clear_search_inputs(self):
         """Clears all search and filter inputs."""
         self.search_input.clear()
+        self.full_text_checkbox.setChecked(False)
         self.filter_search_input.clear()
         for checkbox in self.task_filters.values():
             checkbox.setChecked(False)
@@ -141,6 +148,7 @@ class SearchPanel(QWidget):
 
         return {
             "search_query": self.search_input.text(),
+            "full_text": self.full_text_checkbox.isChecked(),
             "sort": sort_val,
             "direction": -1,  # Always descending for these sort options
             "filters": selected_filters,
@@ -256,6 +264,7 @@ class SearchPanel(QWidget):
         has_checked_filter = any(
             cb.isChecked() for cb in self.task_filters.values()
         )
+        has_full_text = self.full_text_checkbox.isChecked()
         self.clear_button.setVisible(
-            has_search_text or has_filter_text or has_checked_filter
+            has_search_text or has_filter_text or has_checked_filter or has_full_text
         )

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QApplication,
 )
+from PySide6.QtGui import QTextCharFormat, QColor, QTextDocument, QTextCursor
 
 
 class ModelDetailsPanel(QWidget):
@@ -58,16 +59,53 @@ class ModelDetailsPanel(QWidget):
             url = f"https://huggingface.co/{self.current_model_id}"
             webbrowser.open(url)
 
-    def set_model_details(self, model_info, model_readme):
+    def set_model_details(self, model_info, model_readme, highlight_query=None):
         """
         Populates the panel with model details.
         """
         self.current_model_id = model_info.id
         self.title_label.setText(model_info.id)
         self.details_text.setMarkdown(model_readme)
+        
+        if highlight_query:
+            self.highlight_search_term(highlight_query)
+            
         self.download_button.setVisible(True)
         self.copy_button.setVisible(True)
         self.open_hub_button.setVisible(True)
+
+    def highlight_search_term(self, query):
+        """Highlights all occurrences of the query terms in the text document."""
+        if not query:
+            return
+
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("yellow"))
+        fmt.setForeground(QColor("black"))
+
+        document = self.details_text.document()
+        cursor = QTextCursor(document)
+        cursor.beginEditBlock()
+        
+        # Split search terms to highlight each matching word
+        terms = [t.strip() for t in query.split() if len(t.strip()) > 1]
+        if not terms:
+             cursor.endEditBlock()
+             return
+
+        for term in terms:
+            search_cursor = QTextCursor(document)
+            while True:
+                # Default document.find is case-insensitive
+                search_cursor = document.find(term, search_cursor)
+                if search_cursor.isNull():
+                    break
+                search_cursor.mergeCharFormat(fmt)
+            
+        cursor.endEditBlock()
+        
+        # Ensure scroll position is at the top
+        self.details_text.moveCursor(QTextCursor.Start)
 
     def clear_details(self):
         """

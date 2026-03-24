@@ -33,7 +33,7 @@ class HuggingFaceService:
                 # First time connection
                 self._api = HfApi()
 
-    def search_models(self, search_query=None, sort=None, limit=None, filters=None, **kwargs):
+    def search_models(self, search_query=None, sort=None, limit=None, filters=None, full_text=False, **kwargs):
         """
         Searches for models on the Hugging Face Hub.
 
@@ -42,12 +42,76 @@ class HuggingFaceService:
             sort (str, optional): The field to sort by (e.g., 'downloads', 'likes'). Defaults to None.
             limit (int, optional): The maximum number of results to return. Defaults to None.
             filters (list, optional): A list of filters to apply (e.g., 'text-generation'). Defaults to None.
+            full_text (bool, optional): Whether to perform a full-text search (searching READMEs). Defaults to False.
             **kwargs: Additional arguments (like 'direction' which is ignored).
 
         Returns:
-            list: A list of ModelInfo objects.
+            list: A list of objects containing model information.
         """
         self.connect()  # Ensure the connection is up-to-date with the latest token
+
+        if full_text and search_query:
+            # Full-text search API endpoint (searches READMEs/model cards)
+            url = "https://huggingface.co/api/search/full-text"
+            params = {
+                "q": search_query,
+                "type": "model",
+                "limit": limit or 100
+            }
+            try:
+                logger.info(f"Performing full-text search for: {search_query}")
+                response = requests.get(url, params=params, timeout=10)
+                response.raise_for_status()
+                search_results = response.json()
+                hits = search_results.get('hits', [])
+                
+                # Convert hits to ModelInfo-compatible objects
+                from types import SimpleNamespace
+                from datetime import datetime
+                
+                models = []
+                for hit in hits:
+                    repo_owner = hit.get('repoOwner')
+                    repo_name = hit.get('repoName')
+                    if repo_owner and repo_name:
+                        repo_id = f"{repo_owner}/{repo_name}"
+                    else:
+                        repo_id = repo_name or hit.get('repoId', 'unknown')
+
+                    updated_at = hit.get('updatedAt')
+                    last_modified = None
+                    if updated_at:
+                        try:
+                            last_modified = datetime.fromtimestamp(updated_at / 1000)
+                        except Exception:
+                            pass
+                    
+                    # Parse tags string (comma-separated)
+                    tags_str = hit.get('tags', '')
+                    tags_list = [t.strip() for t in tags_str.split(',') if t.strip()]
+                    
+                    # Heuristic for pipeline_tag: often the first or contains known tasks
+                    # We'll just take the first tag if available as a placeholder for pipeline_tag
+                    pipeline_tag = 'N/A'
+                    if tags_list:
+                        pipeline_tag = tags_list[0]
+
+                    # Create a mock ModelInfo object
+                    model = SimpleNamespace(
+                        id=repo_id,
+                        author=hit.get('authorData', {}).get('fullname') or repo_owner or 'N/A',
+                        pipeline_tag=pipeline_tag,
+                        downloads=0, # Not available in full-text search API
+                        likes=hit.get('likes', 0),
+                        lastModified=last_modified,
+                        tags=tags_list
+                    )
+                    models.append(model)
+                logger.info(f"Full-text search returned {len(models)} results.")
+                return models
+            except Exception as e:
+                logger.error(f"Full-text search failed: {e}", exc_info=True)
+                pass # Fallback to standard search
 
         try:
             models = self._api.list_models(

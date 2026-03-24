@@ -399,7 +399,8 @@ class MainWindow(QMainWindow):
         self.threadpool.start(worker)
 
     def on_details_finished(self, model_info, readme, worker=None):
-        self.details_panel.set_model_details(model_info, readme)
+        search_query = self.search_panel.search_input.text()
+        self.details_panel.set_model_details(model_info, readme, highlight_query=search_query)
         self.statusBar().showMessage(f"Details loaded for {model_info.id}.", 3000)
 
     def on_details_error(self, err, worker=None):
