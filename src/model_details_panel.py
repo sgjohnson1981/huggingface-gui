@@ -79,7 +79,39 @@ class ModelDetailsPanel(QWidget):
         """
         self.current_model_id = model_info.id
         self.title_label.setText(model_info.id)
-        self.details_text.setMarkdown(model_readme)
+
+        import re
+        import markdown
+        
+        if model_readme:
+            # Strip YAML frontmatter
+            if model_readme.startswith("---"):
+                model_readme = re.sub(r'^---\n.*?\n---\n?', '', model_readme, flags=re.DOTALL)
+            
+            # Convert python markdown to HTML, as QTextBrowser setMarkdown is buggy
+            html_content = markdown.markdown(
+                model_readme, 
+                extensions=['fenced_code', 'tables', 'sane_lists']
+            )
+            
+            # Add some basic CSS so HTML elements inherit the dark mode style properly
+            # and format images/tables so they don't break the layout
+            styled_html = f"""
+            <style>
+                body {{ color: #ffffff; font-family: sans-serif; }}
+                a {{ color: #3b82f6; }}
+                code, pre {{ background-color: #2d2d2d; padding: 2px 4px; border-radius: 4px; }}
+                pre {{ padding: 10px; }}
+                table {{ border-collapse: collapse; margin-top: 10px; margin-bottom: 10px; }}
+                th, td {{ border: 1px solid #555555; padding: 6px 12px; }}
+                img {{ max-width: 100%; height: auto; }}
+            </style>
+            {html_content}
+            """
+            
+            self.details_text.setHtml(styled_html)
+        else:
+            self.details_text.clear()
         
         if highlight_query:
             self.highlight_search_term(highlight_query)
