@@ -33,7 +33,7 @@ class HuggingFaceService:
                 # First time connection
                 self._api = HfApi()
 
-    def search_models(self, search_query=None, sort=None, limit=None, filters=None, full_text=False, **kwargs):
+    def search_models(self, search_query=None, sort=None, limit=None, filters=None, full_text=False, strict=False, **kwargs):
         """
         Searches for models on the Hugging Face Hub.
 
@@ -73,6 +73,12 @@ class HuggingFaceService:
                 for hit in hits:
                     repo_owner = hit.get('repoOwner')
                     repo_name = hit.get('repoName')
+                    
+                    # Apply strict filtering if requested
+                    if strict and search_query:
+                        if not self._is_hit_strict_match(search_query, hit):
+                            continue
+
                     if repo_owner and repo_name:
                         repo_id = f"{repo_owner}/{repo_name}"
                     else:
@@ -235,6 +241,70 @@ class HuggingFaceService:
         except Exception as e:
             logger.error(f"Error deleting cache for model {model_id}: {e}", exc_info=True)
             return False, f"Error deleting cache: {e}"
+
+
+    def _is_hit_strict_match(self, query, hit):
+        """
+        Determines if a search hit matches a query strictly (without fuzzy matching).
+        Supports boolean operators AND, OR, NOT and parentheses.
+        """
+        import re
+
+        # Collect all text from metadata and snippets
+        text_parts = [
+            hit.get('repoName', '') or '',
+            hit.get('repoOwner', '') or '',
+            hit.get('tags', '') or '',
+            hit.get('repoId', '') or ''
+        ]
+        
+        formatted = hit.get('formatted', {})
+        for field in formatted.values():
+            if isinstance(field, list):
+                for part in field:
+                    if isinstance(part, dict) and 'text' in part:
+                        text_parts.append(part['text'])
+        
+        full_text = " ".join(text_parts).lower()
+
+        # Tokenize query, preserving boolean operators (case-insensitive), parentheses, and quoted strings
+        tokens = re.findall(r'\(|\)|(?i)AND|(?i)OR|(?i)NOT|&|\||!|"[^"]+"|[^\s()]+', query)
+        
+        term_matches = {}
+        for token in tokens:
+            upper_token = token.upper()
+            if upper_token in ('(', ')', 'AND', 'OR', 'NOT', '&', '|', '!'):
+                continue
+            
+            term = token.strip('"').lower()
+            if term not in term_matches:
+                # Check if term is in any part of the text (literal match)
+                term_matches[token] = term in full_text
+        
+        eval_tokens = []
+        for token in tokens:
+            upper_token = token.upper()
+            if upper_token == 'AND' or token == '&': eval_tokens.append('and')
+            elif upper_token == 'OR' or token == '|': eval_tokens.append('or')
+            elif upper_token == 'NOT' or token == '!': eval_tokens.append('not')
+            elif token in ('(', ')'): eval_tokens.append(token)
+            else:
+                eval_tokens.append(str(term_matches.get(token, False)))
+        
+        # Default behavior if no operators: AND all terms
+        has_operator = any(t.upper() in ('AND', 'OR', 'NOT', '&', '|', '!') for t in tokens)
+        if not has_operator:
+            real_terms = [t for t in tokens if t not in ('(', ')')]
+            if not real_terms: return True
+            return all(term_matches.get(t, False) for t in real_terms)
+
+        try:
+            expr = " ".join(eval_tokens)
+            # Safe evaluation of boolean literals and operators
+            return eval(expr, {"__builtins__": None}, {"True": True, "False": False})
+        except Exception as e:
+            logger.warning(f"Failed to evaluate strict match expression: {e}")
+            return True # Fallback to showing results if evaluation fails
 
 
 # Global instance for easy access

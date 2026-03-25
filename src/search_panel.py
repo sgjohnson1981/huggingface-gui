@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
 )
-from PySide6.QtCore import Signal, QTimer
+from PySide6.QtCore import Signal, QTimer, Qt
 
 
 class SearchPanel(QWidget):
@@ -24,15 +24,41 @@ class SearchPanel(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-        # Search Query
+        # Search Query with Help Icon
+        search_query_layout = QHBoxLayout()
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search for models...")
+        self.search_input.setPlaceholderText("Search for models (supports AND, OR, NOT)...")
+        search_help_text = (
+            "Enter keywords or complex queries using boolean operators:\n"
+            "- AND / &: Both terms must match\n"
+            "- OR / |: Either term can match\n"
+            "- NOT / !: Exclude terms\n"
+            "- ( ): Use parentheses to group conditions\n"
+            "- \" \": Use quotes for exact phrases\n\n"
+            "Use 'Strict keyword matching' below to disable fuzzy results like 'evaluation' for 'evolution'."
+        )
+        # Remove tooltip from text box as requested
         self.search_input.textChanged.connect(self.update_clear_button_visibility)
+        
+        self.help_icon = QLabel("❓")
+        self.help_icon.setToolTip(search_help_text)
+        self.help_icon.setCursor(Qt.PointingHandCursor)
+        self.help_icon.setStyleSheet("font-size: 16px; margin-left: 5px; color: #2a82da;")
+        
+        search_query_layout.addWidget(self.search_input)
+        search_query_layout.addWidget(self.help_icon)
 
         # Full Text Search Checkbox
         self.full_text_checkbox = QCheckBox("Full-text search (READMEs)")
         self.full_text_checkbox.setToolTip("Search within model cards/READMEs instead of just by title/ID.")
         self.full_text_checkbox.stateChanged.connect(self.update_clear_button_visibility)
+
+        # Strict Search Checkbox (only for Full Text)
+        self.strict_search_checkbox = QCheckBox("Strict keyword matching")
+        self.strict_search_checkbox.setToolTip("Disable fuzzy matching (e.g. searching 'evolution' won't return 'evaluation').")
+        self.strict_search_checkbox.setEnabled(False) # Only enabled if full_text is checked
+        self.full_text_checkbox.stateChanged.connect(lambda state: self.strict_search_checkbox.setEnabled(state == 2))
+        self.strict_search_checkbox.stateChanged.connect(self.update_clear_button_visibility)
 
         # Sorting
         self.sort_combo = QComboBox()
@@ -109,8 +135,9 @@ class SearchPanel(QWidget):
 
         # Layout
         form_layout = QFormLayout()
-        form_layout.addRow(self.search_input)
+        form_layout.addRow(search_query_layout)
         form_layout.addRow(self.full_text_checkbox)
+        form_layout.addRow(self.strict_search_checkbox)
         form_layout.addRow(QLabel("Sort by:"))
         form_layout.addRow(self.sort_combo)
 
@@ -123,6 +150,7 @@ class SearchPanel(QWidget):
         """Clears all search and filter inputs."""
         self.search_input.clear()
         self.full_text_checkbox.setChecked(False)
+        self.strict_search_checkbox.setChecked(False)
         self.filter_search_input.clear()
         for checkbox in self.task_filters.values():
             checkbox.setChecked(False)
@@ -149,6 +177,7 @@ class SearchPanel(QWidget):
         return {
             "search_query": self.search_input.text(),
             "full_text": self.full_text_checkbox.isChecked(),
+            "strict": self.strict_search_checkbox.isChecked(),
             "sort": sort_val,
             "direction": -1,  # Always descending for these sort options
             "filters": selected_filters,
