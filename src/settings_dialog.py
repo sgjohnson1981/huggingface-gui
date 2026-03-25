@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QFileDialog,
+    QSpinBox,
 )
 from .config_manager import config_manager
 
@@ -39,6 +40,13 @@ class SettingsDialog(QDialog):
         download_dir_layout.addWidget(browse_button)
         self.form_layout.addRow("Default Download Directory:", download_dir_layout)
 
+        # Search Limit
+        self.search_limit_spin = QSpinBox()
+        self.search_limit_spin.setRange(0, 100000)
+        self.search_limit_spin.setSpecialValueText("Unlimited")
+        self.search_limit_spin.setValue(config_manager.get("search_limit", 100))
+        self.form_layout.addRow("Search Result Limit:", self.search_limit_spin)
+
         # Other settings
         self.prompt_download_checkbox = QCheckBox("Always ask for download location")
         self.prompt_download_checkbox.setChecked(config_manager.get("prompt_for_download"))
@@ -67,6 +75,7 @@ class SettingsDialog(QDialog):
         # Save settings
         config_manager.set("hf_token", self.hf_token_input.text())
         config_manager.set("download_dir", self.download_dir_input.text())
+        config_manager.set("search_limit", self.search_limit_spin.value())
         config_manager.set("prompt_for_download", self.prompt_download_checkbox.isChecked())
         config_manager.set("view_details_in_new_window", self.view_details_window_checkbox.isChecked())
         config_manager.save_config()

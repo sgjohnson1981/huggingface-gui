@@ -53,10 +53,11 @@ class HuggingFaceService:
         if full_text and search_query:
             # Full-text search API endpoint (searches READMEs/model cards)
             url = "https://huggingface.co/api/search/full-text"
+            config_limit = config_manager.get('search_limit', 100)
             params = {
                 "q": search_query,
                 "type": "model",
-                "limit": limit or 100
+                "limit": limit or (config_limit if config_limit > 0 else 10000) # Full-text API doesn't allow None limit reliably
             }
             try:
                 logger.info(f"Performing full-text search for: {search_query}")
@@ -113,24 +114,26 @@ class HuggingFaceService:
                         tags=tags_list
                     )
                     models.append(model)
-                logger.info(f"Full-text search returned {len(models)} results.")
-                return models
+                logger.info(f"Full-text search returned {len(models)} results (estimated total: {search_results.get('estimatedTotalHits')}).")
+                return models, search_results.get('estimatedTotalHits')
             except Exception as e:
                 logger.error(f"Full-text search failed: {e}", exc_info=True)
                 pass # Fallback to standard search
 
         try:
+            config_limit = config_manager.get('search_limit', 100)
             models = self._api.list_models(
                 search=search_query,
                 sort=sort,
-                limit=limit,
+                limit=limit or (config_limit if config_limit > 0 else None),
                 filter=filters,
                 full=False,
             )
-            return list(models)
+            results_list = list(models)
+            return results_list, None # Standard API doesn't return total without full iteration
         except Exception as e:
             logger.error(f"An error occurred while searching for models: {e}", exc_info=True)
-            return []
+            return [], 0
 
     def get_model_tags(self):
         """

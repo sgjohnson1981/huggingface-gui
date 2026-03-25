@@ -354,11 +354,16 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Search cancelled.", 3000)
 
     def on_search_finished(self, results):
-        self.statusBar().showMessage(f"Found {len(results)} models.")
-        self.results_model.set_data(results)
+        models, total_hits = results
+        self.results_model.set_data(models)
         self.details_panel.clear_details()
-        # The worker/timer will be stopped in the process_search_queue method
-        # which is called right after this one.
+
+        # Update status bar with meaningful result summary
+        model_count = len(models)
+        if total_hits and model_count < total_hits:
+            self.statusBar().showMessage(f"Showing first {model_count} models out of {total_hits:,} estimated total hits.")
+        else:
+            self.statusBar().showMessage(f"Found {model_count} models.")
 
     def on_search_error(self, err):
         exctype, value, tb = err

@@ -30,7 +30,8 @@ class ConfigManager:
             'hf_token': '',
             'download_dir': os.path.expanduser('~/huggingface_downloads'),
             'prompt_for_download': True,
-            'view_details_in_new_window': False
+            'view_details_in_new_window': False,
+            'search_limit': 100
         }
 
     def ensure_download_dir_exists(self):
