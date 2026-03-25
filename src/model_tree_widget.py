@@ -101,8 +101,9 @@ class ModelTreeWidget(QWidget):
             base_link.clicked.connect(self.modelClicked.emit)
             
             base_layout.addWidget(base_label)
-            base_layout.addStretch()
+            base_layout.addSpacing(10)
             base_layout.addWidget(base_link)
+            base_layout.addStretch()
             self.container_layout.addLayout(base_layout)
 
             # Branch icon for current model
@@ -121,8 +122,9 @@ class ModelTreeWidget(QWidget):
             
             branch_layout.addWidget(branch_label)
             branch_layout.addWidget(type_label)
-            branch_layout.addStretch()
+            branch_layout.addSpacing(10)
             branch_layout.addWidget(badge)
+            branch_layout.addStretch()
             self.container_layout.addLayout(branch_layout)
 
             # Children of this model
@@ -152,8 +154,9 @@ class ModelTreeWidget(QWidget):
                     
                     child_layout.addWidget(child_branch)
                     child_layout.addWidget(child_name)
-                    child_layout.addStretch()
+                    child_layout.addSpacing(10)
                     child_layout.addWidget(link)
+                    child_layout.addStretch()
                     self.container_layout.addLayout(child_layout)
         else:
             # If no base model, this might be a base model itself.
@@ -174,10 +177,6 @@ class ModelTreeWidget(QWidget):
                     child_name = QLabel(label)
                     child_name.setObjectName("label")
                     
-                    child_dots = QLabel("." * 30)
-                    child_dots.setObjectName("label")
-                    child_dots.setAlignment(Qt.AlignCenter)
-                    
                     filter_str = f"base_model:{key[:-1]}:{model_id}" if key != "quantizations" else f"base_model:quantized:{model_id}"
                     if key == "finetunes":
                         filter_str = f"base_model:finetune:{model_id}"
@@ -189,6 +188,7 @@ class ModelTreeWidget(QWidget):
                     
                     child_layout.addWidget(child_branch)
                     child_layout.addWidget(child_name)
-                    child_layout.addWidget(child_dots, 1)
+                    child_layout.addSpacing(10)
                     child_layout.addWidget(link)
+                    child_layout.addStretch()
                     self.layout.addLayout(child_layout)
