@@ -173,6 +173,53 @@ class HuggingFaceService:
             logger.error(f"An unexpected error occurred while fetching README for {model_id}: {e}", exc_info=True)
             return f"An unexpected error occurred: {e}"
 
+    def get_model_relationships(self, model_id):
+        """
+        Fetches the relationships (base model, finetunes, adapters, quantizations) for a model.
+        """
+        self.connect()
+        try:
+            model_info = self._api.model_info(model_id)
+            
+            # Find base model in tags
+            base_model_id = None
+            for tag in model_info.tags:
+                if tag.startswith("base_model:") and not tag.startswith("base_model:finetune:") and not tag.startswith("base_model:adapter:") and not tag.startswith("base_model:quantized:"):
+                    base_model_id = tag.replace("base_model:", "")
+                    break
+            
+            # If not found in tags, check 'base_model' attribute (sometimes present in newer versions of library)
+            if not base_model_id:
+                base_model_id = getattr(model_info, 'base_model', None)
+
+            # Count finetunes, adapters, quantizations
+            # We use a limit of 1 just to see if any exist, but the user wants the full count.
+            # To get a full count without fetching all data, we could use the search API or just iterate.
+            # For now, we'll iterate as it's the most reliable way to get an accurate count via HfApi.
+            
+            def count_filtered(filter_expr):
+                try:
+                    models = self._api.list_models(filter=filter_expr)
+                    return sum(1 for _ in models)
+                except Exception as e:
+                    logger.warning(f"Error counting models with filter {filter_expr}: {e}")
+                    return 0
+
+            finetunes_count = count_filtered(f"base_model:finetune:{model_id}")
+            adapters_count = count_filtered(f"base_model:adapter:{model_id}")
+            quantizations_count = count_filtered(f"base_model:quantized:{model_id}")
+
+            return {
+                "base_model": base_model_id,
+                "finetunes": finetunes_count,
+                "adapters": adapters_count,
+                "quantizations": quantizations_count,
+                "this_model_is_finetune": any(tag.startswith("base_model:finetune:") for tag in model_info.tags)
+            }
+        except Exception as e:
+            logger.error(f"Error fetching relationships for {model_id}: {e}", exc_info=True)
+            return None
+
     def download_model(self, model_id, download_dir, progress_callback=None):
         """
         Downloads an entire model repository to a specified directory.

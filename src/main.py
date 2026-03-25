@@ -84,6 +84,8 @@ class MainWindow(QMainWindow):
         # Bottom Right: Model Details
         self.details_panel = ModelDetailsPanel()
         self.details_panel.download_button.clicked.connect(self.on_download_clicked)
+        self.details_panel.tree_widget.modelClicked.connect(self.navigate_to_model)
+        self.details_panel.tree_widget.filterClicked.connect(self.perform_filtered_search)
         self.right_splitter.addWidget(self.details_panel)
 
         # Set stretch factors:
@@ -371,6 +373,19 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Search Error", f"An unexpected error occurred during search: {value}")
         self.statusBar().showMessage("Search failed.", 5000)
         # The worker/timer will be stopped in the process_search_queue method.
+
+    def navigate_to_model(self, model_id):
+        """Navigates to a specific model by ID."""
+        self.search_panel.search_input.setText(model_id)
+        self.perform_search({"search_query": model_id, "strict": True})
+
+    def perform_filtered_search(self, filter_str):
+        """Performs a search with a specific relationship filter."""
+        # We need to parse the filter_str or just pass it as tags/other filter
+        # The URL was https://huggingface.co/models?other=base_model:finetune:Qwen/Qwen3.5-4B
+        # Our search_models takes 'filters' as a list.
+        self.statusBar().showMessage(f"Searching for related models: {filter_str}")
+        self.perform_search({"filters": [filter_str]})
 
     def on_model_selected(self, selected, deselected):
         if not selected.indexes():
