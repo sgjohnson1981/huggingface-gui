@@ -10,8 +10,63 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QCheckBox,
     QGroupBox,
+    QFrame,
+    QSizePolicy,
 )
 from PySide6.QtCore import Signal, QTimer, Qt
+
+
+class FilterChip(QFrame):
+    removed = Signal(str)
+
+    def __init__(self, text, tag, parent=None):
+        super().__init__(parent)
+        self.tag = tag
+        self.setObjectName("filter_chip")
+        
+        # Styling to look like a chip
+        self.setStyleSheet("""
+            QFrame#filter_chip {
+                background-color: #2a82da;
+                border-radius: 12px;
+                padding: 2px 6px;
+            }
+            QLabel {
+                color: white;
+                font-weight: bold;
+                background: transparent;
+            }
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: white;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 0;
+                margin: 0;
+            }
+            QPushButton:hover {
+                color: #ffcccc;
+            }
+        """)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(4)
+
+        self.label = QLabel(text)
+        layout.addWidget(self.label)
+
+        self.remove_btn = QPushButton("✕")
+        self.remove_btn.setCursor(Qt.PointingHandCursor)
+        self.remove_btn.setFixedSize(16, 16)
+        self.remove_btn.clicked.connect(self._on_remove_clicked)
+        layout.addWidget(self.remove_btn)
+        
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+
+    def _on_remove_clicked(self):
+        self.removed.emit(self.tag)
 
 
 class SearchPanel(QWidget):
@@ -23,6 +78,13 @@ class SearchPanel(QWidget):
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Active Chips Layout
+        self.active_chips = {}  # tag -> FilterChip
+        self.active_chips_layout = QHBoxLayout()
+        self.active_chips_layout.setContentsMargins(0, 0, 0, 0)
+        self.active_chips_layout.setSpacing(5)
+        self.active_chips_layout.setAlignment(Qt.AlignLeft)
 
         # Search Query with Help Icon
         search_query_layout = QHBoxLayout()
@@ -132,10 +194,13 @@ class SearchPanel(QWidget):
         button_layout.addWidget(self.search_button)
         button_layout.addWidget(self.clear_button)
 
+        search_vlayout = QVBoxLayout()
+        search_vlayout.addLayout(self.active_chips_layout)
+        search_vlayout.addLayout(search_query_layout)
 
         # Layout
         form_layout = QFormLayout()
-        form_layout.addRow(search_query_layout)
+        form_layout.addRow(search_vlayout)
         form_layout.addRow(self.full_text_checkbox)
         form_layout.addRow(self.strict_search_checkbox)
         form_layout.addRow(QLabel("Sort by:"))
@@ -146,6 +211,43 @@ class SearchPanel(QWidget):
         self.layout.addLayout(button_layout)
         self.layout.addWidget(self.cancel_button)
 
+    def add_filter_chip(self, tag):
+        """Adds a visual filter chip above the search bar."""
+        if tag in self.active_chips:
+            return
+
+        formatted_text = self._format_tag_name(tag)
+        # Custom formatting for base_model relationships
+        if tag.startswith("base_model:"):
+            parts = tag.split(":")
+            if len(parts) >= 3:
+                rel_type = parts[1].capitalize()
+                base_name = ":".join(parts[2:])
+                formatted_text = f"{rel_type} of {base_name}"
+            else:
+                formatted_text = tag
+
+        chip = FilterChip(formatted_text, tag)
+        chip.removed.connect(self.remove_filter_chip)
+        
+        self.active_chips[tag] = chip
+        self.active_chips_layout.addWidget(chip)
+        self.update_clear_button_visibility()
+
+    def remove_filter_chip(self, tag):
+        """Removes a filter chip and triggers a new search."""
+        if tag in self.active_chips:
+            chip = self.active_chips.pop(tag)
+            self.active_chips_layout.removeWidget(chip)
+            chip.deleteLater()
+            self.update_clear_button_visibility()
+            # Automatically trigger search when a chip is removed
+            self.on_search_clicked()
+
+    def get_active_chips(self):
+        """Returns a list of tags currently active as chips."""
+        return list(self.active_chips.keys())
+
     def clear_search_inputs(self):
         """Clears all search and filter inputs."""
         self.search_input.clear()
@@ -154,6 +256,13 @@ class SearchPanel(QWidget):
         self.filter_search_input.clear()
         for checkbox in self.task_filters.values():
             checkbox.setChecked(False)
+        
+        # Clear chips
+        for tag in list(self.active_chips.keys()):
+            chip = self.active_chips.pop(tag)
+            self.active_chips_layout.removeWidget(chip)
+            chip.deleteLater()
+            
         self.update_clear_button_visibility()
 
     def on_search_clicked(self):
@@ -173,6 +282,9 @@ class SearchPanel(QWidget):
         selected_filters = [
             task for task, checkbox in self.task_filters.items() if checkbox.isChecked()
         ]
+        
+        # Include active chips
+        selected_filters.extend(self.get_active_chips())
 
         return {
             "search_query": self.search_input.text(),
@@ -293,7 +405,8 @@ class SearchPanel(QWidget):
         has_checked_filter = any(
             cb.isChecked() for cb in self.task_filters.values()
         )
+        has_chips = len(self.active_chips) > 0
         has_full_text = self.full_text_checkbox.isChecked()
         self.clear_button.setVisible(
-            has_search_text or has_filter_text or has_checked_filter or has_full_text
+            has_search_text or has_filter_text or has_checked_filter or has_chips or has_full_text
         )

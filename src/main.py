@@ -380,12 +380,10 @@ class MainWindow(QMainWindow):
         self.perform_search({"search_query": model_id, "strict": True})
 
     def perform_filtered_search(self, filter_str):
-        """Performs a search with a specific relationship filter."""
-        # We need to parse the filter_str or just pass it as tags/other filter
-        # The URL was https://huggingface.co/models?other=base_model:finetune:Qwen/Qwen3.5-4B
-        # Our search_models takes 'filters' as a list.
-        self.statusBar().showMessage(f"Searching for related models: {filter_str}")
-        self.perform_search({"filters": [filter_str]})
+        """Adds a relationship filter chip and performs a search."""
+        self.statusBar().showMessage(f"Adding filter for related models: {filter_str}")
+        self.search_panel.add_filter_chip(filter_str)
+        self.perform_search(self.search_panel.get_search_parameters())
 
     def on_model_selected(self, selected, deselected):
         if not selected.indexes():

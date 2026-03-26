@@ -54,8 +54,14 @@ class HuggingFaceService:
             # Full-text search API endpoint (searches READMEs/model cards)
             url = "https://huggingface.co/api/search/full-text"
             config_limit = config_manager.get('search_limit', 100)
+            # Combine filters into the query string for the API since it doesn't take a separate tags array
+            api_query = search_query
+            if filters:
+                filter_str = " ".join([f'tags:"{f}"' for f in filters])
+                api_query = f"{api_query} {filter_str}".strip()
+
             params = {
-                "q": search_query,
+                "q": api_query,
                 "type": "model",
                 "limit": limit or (config_limit if config_limit > 0 else 10000) # Full-text API doesn't allow None limit reliably
             }
@@ -75,8 +81,8 @@ class HuggingFaceService:
                     repo_owner = hit.get('repoOwner')
                     repo_name = hit.get('repoName')
                     
-                    # Apply strict filtering if requested
-                    if strict and search_query:
+                    # Apply strict filtering if requested or if filters were injected into the query (which causes OR matches on the backend)
+                    if (strict or filters) and search_query:
                         if not self._is_hit_strict_match(search_query, hit):
                             continue
 
@@ -97,6 +103,11 @@ class HuggingFaceService:
                     tags_str = hit.get('tags', '')
                     tags_list = [t.strip() for t in tags_str.split(',') if t.strip()]
                     
+                    # Apply tag filters if requested
+                    if filters:
+                        if not all(f in tags_list for f in filters):
+                            continue
+                    
                     # Heuristic for pipeline_tag: often the first or contains known tasks
                     # We'll just take the first tag if available as a placeholder for pipeline_tag
                     pipeline_tag = 'N/A'
@@ -114,8 +125,11 @@ class HuggingFaceService:
                         tags=tags_list
                     )
                     models.append(model)
-                logger.info(f"Full-text search returned {len(models)} results (estimated total: {search_results.get('estimatedTotalHits')}).")
-                return models, search_results.get('estimatedTotalHits')
+                logger.info(f"Full-text search returned {len(models)} results (estimated total API hits: {search_results.get('estimatedTotalHits')}).")
+                
+                # If we injected filters, the API's estimated hits represent an OR query and are wildly inaccurate for our AND requirement.
+                estimated_total = search_results.get('estimatedTotalHits') if not filters else None
+                return models, estimated_total
             except Exception as e:
                 logger.error(f"Full-text search failed: {e}", exc_info=True)
                 pass # Fallback to standard search
@@ -318,7 +332,7 @@ class HuggingFaceService:
         full_text = " ".join(text_parts).lower()
 
         # Tokenize query, preserving boolean operators (case-insensitive), parentheses, and quoted strings
-        tokens = re.findall(r'\(|\)|(?i)AND|(?i)OR|(?i)NOT|&|\||!|"[^"]+"|[^\s()]+', query)
+        tokens = re.findall(r'\(|\)|AND|OR|NOT|&|\||!|"[^"]+"|[^\s()]+', query, re.IGNORECASE)
         
         term_matches = {}
         for token in tokens:
