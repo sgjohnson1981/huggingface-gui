@@ -67,18 +67,23 @@ class ModelTreeWidget(QWidget):
         
         self.layout.addWidget(self.container)
 
+    def _clear_layout(self, layout):
+        if layout is not None:
+            while layout.count():
+                item = layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+                elif item.layout() is not None:
+                    self._clear_layout(item.layout())
+                    item.layout().deleteLater()
+
     def set_relationships(self, model_id, relationships):
         """
         Populates the widget with relationship data.
         """
         # Clear existing layout inside container
-        while self.container_layout.count():
-            item = self.container_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                # Recursively clear sub-layouts if any
-                pass
+        self._clear_layout(self.container_layout)
 
         if not relationships:
             self.setVisible(False)
@@ -163,7 +168,7 @@ class ModelTreeWidget(QWidget):
             # We can still show its children.
             model_label = QLabel(model_id)
             model_label.setObjectName("label")
-            self.layout.addWidget(model_label)
+            self.container_layout.addWidget(model_label)
             
             for key, label in [("adapters", "Adapters"), ("finetunes", "Finetunes"), ("quantizations", "Quantizations")]:
                 count = relationships.get(key, 0)
@@ -191,4 +196,4 @@ class ModelTreeWidget(QWidget):
                     child_layout.addSpacing(10)
                     child_layout.addWidget(link)
                     child_layout.addStretch()
-                    self.layout.addLayout(child_layout)
+                    self.container_layout.addLayout(child_layout)
