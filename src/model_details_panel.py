@@ -17,7 +17,30 @@ from .worker import Worker
 from .huggingface_service import hf_service
 import sys
 import traceback
+import requests
+import re
+from PySide6.QtCore import QUrl
 
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEnginePage
+
+class ModelWebEnginePage(QWebEnginePage):
+    def __init__(self, parent=None, popup_callback=None):
+        super().__init__(parent)
+        self.popup_callback = popup_callback
+
+    def acceptNavigationRequest(self, url, _type, isMainFrame):
+        url_str = url.toString() if hasattr(url, 'toString') else str(url)
+        if _type == QWebEnginePage.NavigationTypeLinkClicked:
+            if url_str.startswith("image-popup:"):
+                if self.popup_callback:
+                    self.popup_callback(url_str)
+                return False
+            else:
+                import webbrowser
+                webbrowser.open(url_str)
+                return False
+        return super().acceptNavigationRequest(url, _type, isMainFrame)
 
 class ModelDetailsPanel(QWidget):
     def __init__(self, parent=None):
@@ -58,9 +81,10 @@ class ModelDetailsPanel(QWidget):
         self.tree_widget.setVisible(False)
         self.layout.addWidget(self.tree_widget)
 
-        self.details_text = QTextBrowser()
-        self.details_text.setOpenExternalLinks(True)
-        self.details_text.setStyleSheet("background-color: #1e1e1e; color: #ffffff; border: none; padding: 10px;")
+        self.details_text = QWebEngineView()
+        self.details_page = ModelWebEnginePage(self, popup_callback=self.handle_link_clicked)
+        self.details_text.setPage(self.details_page)
+        self.details_text.setStyleSheet("background-color: #1e1e1e;")
         
         self.layout.addWidget(self.details_text)
 
@@ -70,8 +94,22 @@ class ModelDetailsPanel(QWidget):
 
     def open_on_hub(self):
         if self.current_model_id:
+            import webbrowser
             url = f"https://huggingface.co/{self.current_model_id}"
             webbrowser.open(url)
+
+    def handle_link_clicked(self, url_str):
+        if url_str.startswith("image-popup:"):
+            img_url = url_str.split("image-popup:", 1)[1]
+            from .image_popup_dialog import ImagePopupDialog
+            from PySide6.QtCore import Qt
+            self.image_popup = ImagePopupDialog(self)
+            self.image_popup.setWindowModality(Qt.ApplicationModal)
+            self.image_popup.load_image(img_url)
+            self.image_popup.show()
+        else:
+            import webbrowser
+            webbrowser.open(url_str)
 
     def set_model_details(self, model_info, model_readme, highlight_query=None):
         """
@@ -94,24 +132,42 @@ class ModelDetailsPanel(QWidget):
                 extensions=['fenced_code', 'tables', 'sane_lists']
             )
             
+            image_urls = []
+            # Rewrite img tags to use absolute URLs and wrap in anchor for the popup
+            def rewrite_img(match):
+                full_tag = match.group(0)
+                src = match.group(1)
+                new_src = src
+                if not src.startswith(('http://', 'https://', 'data:')):
+                    clean_src = src.lstrip('./').lstrip('/')
+                    new_src = f"https://huggingface.co/{self.current_model_id}/resolve/main/{clean_src}"
+                    full_tag = full_tag.replace(f'src="{src}"', f'src="{new_src}"').replace(f"src='{src}'", f"src='{new_src}'")
+                
+                image_urls.append(new_src)
+                return f'<a href="image-popup:{new_src}">{full_tag}</a>'
+
+            html_content = re.sub(r'<img\s+[^>]*?src=["\']([^"\']+)["\'][^>]*>', rewrite_img, html_content)
+            
             # Add some basic CSS so HTML elements inherit the dark mode style properly
             # and format images/tables so they don't break the layout
             styled_html = f"""
             <style>
-                body {{ color: #ffffff; font-family: sans-serif; }}
-                a {{ color: #3b82f6; }}
+                body {{ background-color: #1e1e1e; color: #ffffff; font-family: sans-serif; padding: 10px; margin: 0; }}
+                a {{ color: #3b82f6; text-decoration: none; }}
+                a:hover {{ text-decoration: underline; }}
                 code, pre {{ background-color: #2d2d2d; padding: 2px 4px; border-radius: 4px; }}
-                pre {{ padding: 10px; }}
-                table {{ border-collapse: collapse; margin-top: 10px; margin-bottom: 10px; }}
+                pre {{ padding: 10px; overflow-x: auto; }}
+                table {{ border-collapse: collapse; margin-top: 10px; margin-bottom: 10px; width: 100%; }}
                 th, td {{ border: 1px solid #555555; padding: 6px 12px; }}
-                img {{ max-width: 100%; height: auto; }}
+                img {{ max-width: 100%; max-height: 600px; height: auto; object-fit: contain; margin: 10px 0; }}
             </style>
             {html_content}
             """
             
             self.details_text.setHtml(styled_html)
+                
         else:
-            self.details_text.clear()
+            self.details_text.setHtml("")
         
         if highlight_query:
             self.highlight_search_term(highlight_query)
@@ -144,37 +200,28 @@ class ModelDetailsPanel(QWidget):
             self.tree_widget.setVisible(False)
 
     def highlight_search_term(self, query):
-        """Highlights all occurrences of the query terms in the text document."""
+        """Highlights occurrences of the query terms using JavaScript."""
         if not query:
             return
 
-        fmt = QTextCharFormat()
-        fmt.setBackground(QColor("yellow"))
-        fmt.setForeground(QColor("black"))
-
-        document = self.details_text.document()
-        cursor = QTextCursor(document)
-        cursor.beginEditBlock()
-        
-        # Split search terms to highlight each matching word
         terms = [t.strip() for t in query.split() if len(t.strip()) > 1]
         if not terms:
-             cursor.endEditBlock()
              return
 
-        for term in terms:
-            search_cursor = QTextCursor(document)
-            while True:
-                # Default document.find is case-insensitive
-                search_cursor = document.find(term, search_cursor)
-                if search_cursor.isNull():
-                    break
-                search_cursor.mergeCharFormat(fmt)
-            
-        cursor.endEditBlock()
-        
-        # Ensure scroll position is at the top
-        self.details_text.moveCursor(QTextCursor.Start)
+        # Simple JS script to highlight text, wait for ready
+        js = f"""
+        function highlightText() {{
+            let words = {terms};
+            words.forEach(word => {{
+                let body = document.body.innerHTML;
+                let regex = new RegExp(`(${{word}})`, 'gi');
+                document.body.innerHTML = body.replace(regex, '<span style="background-color: yellow; color: black;">$1</span>');
+            }});
+            window.scrollTo(0,0);
+        }}
+        highlightText();
+        """
+        self.details_text.page().runJavaScript(js)
 
     def clear_details(self):
         """
@@ -182,7 +229,7 @@ class ModelDetailsPanel(QWidget):
         """
         self.current_model_id = None
         self.title_label.setText("Select a model to see details")
-        self.details_text.clear()
+        self.details_text.setHtml("")
         self.download_button.setVisible(False)
         self.copy_button.setVisible(False)
         self.open_hub_button.setVisible(False)

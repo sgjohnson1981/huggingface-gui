@@ -25,6 +25,9 @@ class ModelTreeWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(5)
