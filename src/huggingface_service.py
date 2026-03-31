@@ -241,33 +241,42 @@ class HuggingFaceService:
         """
         self.connect()
 
-        # Helper class that mimics tqdm's interface to capture progress updates
-        # from snapshot_download and forward them to our Qt signal.
-        class ProgressCallbackTqdm:
+        from tqdm import tqdm
+
+        # Helper class that inherits from tqdm to satisfy the interface requirements
+        # of the Hugging Face library, while forwarding progress to our Qt signal.
+        class ProgressCallbackTqdm(tqdm):
             def __init__(self, *args, **kwargs):
+                # Redirect output to devnull to avoid console noise
+                kwargs['file'] = open(os.devnull, 'w')
+                super().__init__(*args, **kwargs)
                 self.callback = progress_callback
-                # snapshot_download provides the total number of files in kwargs
-                self.total = kwargs.get("total", 0)
-                self.current = 0
                 if self.callback:
-                    # Initial call to set up the progress bar (e.g., set max value)
-                    self.callback(self.current, self.total)
+                    self._send_progress()
+
+            def _send_progress(self, current=None):
+                n = current if current is not None else getattr(self, 'n', 0)
+                total = getattr(self, 'total', 0)
+                if total is None: total = 0
+                desc = getattr(self, 'desc', "")
+                if desc is None: desc = ""
+                unit = getattr(self, 'unit', "")
+                if unit is None: unit = ""
+                self.callback(id(self), n, total, desc, unit)
 
             def update(self, n=1):
-                self.current += n
+                super().update(n)
                 if self.callback:
-                    self.callback(self.current, self.total)
+                    self._send_progress()
 
             def close(self):
-                # Ensure the progress bar reaches 100% if it was started
-                if self.callback and self.total > 0 and self.current < self.total:
-                    self.callback(self.total, self.total)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                self.close()
+                total = getattr(self, 'total', 0)
+                current = getattr(self, 'n', 0)
+                if self.callback and total > 0 and current < total:
+                    self._send_progress(total)
+                super().close()
+                if hasattr(self.fp, 'close'):
+                    self.fp.close()
 
         try:
             # snapshot_download will download the whole repo and return the path
@@ -394,8 +403,8 @@ def run_download_in_process(queue, model_id, download_dir):
         service = HuggingFaceService()
 
         # Define a callback that puts progress updates into the queue
-        def progress_callback(current, total):
-            queue.put(('progress', (current, total)))
+        def progress_callback(instance_id, current, total, desc, unit):
+            queue.put(('progress', (instance_id, current, total, desc, unit)))
 
         # Call the download method with the process-safe callback
         success, message = service.download_model(

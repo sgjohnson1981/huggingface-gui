@@ -144,7 +144,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            while not self.current_search_worker.queue.empty():
+            while self.current_search_worker and not self.current_search_worker.queue.empty():
                 message_type, data = self.current_search_worker.queue.get_nowait()
 
                 if message_type == 'result':
@@ -173,7 +173,8 @@ class MainWindow(QMainWindow):
 
         try:
             # Read all available messages from the queue
-            while not self.current_download_worker.queue.empty():
+            # Read all available messages from the queue
+            while self.current_download_worker and not self.current_download_worker.queue.empty():
                 message_type, data = self.current_download_worker.queue.get_nowait()
 
                 if message_type == 'progress':
@@ -462,11 +463,73 @@ class MainWindow(QMainWindow):
         self.current_download_worker.start()
         self.download_queue_timer.start()
 
-    def on_download_progress(self, current, total):
+    def on_download_progress(self, instance_id, current, total, desc="", unit=""):
+        if not hasattr(self, '_active_progress_bars'):
+            self._active_progress_bars = {}
+
+        # Safely convert to float/int and handle None
+        try:
+            current = float(current or 0)
+            total = float(total or 0)
+        except (ValueError, TypeError):
+            current, total = 0, 0
+            
+        desc = str(desc or "")
+        unit = str(unit or "")
+            
+        self._active_progress_bars[instance_id] = (current, total, desc, unit)
+
+        # Decide which bar to display.
+        # Strategy:
+        # 1. Prefer active byte bars (those where unit='B' and current < total).
+        # 2. If no active byte bars, show the first non-finished bar.
+        # 3. Fallback to instance_id.
+        
+        active_byte_bars = {k: v for k, v in self._active_progress_bars.items() if v[3] == 'B' and v[0] < v[1] and v[1] > 0}
+        
+        target_id = None
+        if active_byte_bars:
+            target_id = next(iter(active_byte_bars))
+            msg_header = f"[{len(active_byte_bars)} active] "
+        else:
+            # Maybe show overall bar if it's not finished
+            non_finished = {k: v for k, v in self._active_progress_bars.items() if v[0] < v[1] and v[1] > 0}
+            if non_finished:
+                target_id = next(iter(non_finished))
+            else:
+                target_id = instance_id
+            msg_header = ""
+
+        current, total, desc, unit = self._active_progress_bars[target_id]
+
         if total > 0:
-            self.progress_bar.setMaximum(total)
-            self.progress_bar.setValue(current)
-            self.status_bar.showMessage(f"Downloading file {current} of {total}...")
+            if total > 1_000_000_000:
+                 self.progress_bar.setMaximum(1000)
+                 self.progress_bar.setValue(int((current / total) * 1000))
+            else:
+                 self.progress_bar.setMaximum(int(total))
+                 self.progress_bar.setValue(int(current))
+
+            if unit == 'B':
+                current_fmt = self._format_size(current)
+                total_fmt = self._format_size(total)
+                msg = f"{desc}: {current_fmt} / {total_fmt}" if desc else f"Downloading: {current_fmt} / {total_fmt}"
+            else:
+                unit_str = unit if unit else "files"
+                msg = f"{desc}: {int(current)} / {int(total)} {unit_str}" if desc else f"Downloading: {int(current)} / {int(total)} {unit_str}"
+            
+            self.status_bar.showMessage(msg_header + msg)
+
+    def _format_size(self, size_bytes):
+        """Formats bytes into human-readable strings."""
+        if size_bytes == 0:
+            return "0 B"
+        size_name = ("B", "KB", "MB", "GB", "TB")
+        import math
+        i = int(math.floor(math.log(size_bytes, 1024)))
+        p = math.pow(1024, i)
+        s = round(size_bytes / p, 2)
+        return f"{s} {size_name[i]}"
 
     def cancel_download(self):
         if self.current_download_worker and self.current_download_worker.is_running():
